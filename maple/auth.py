@@ -28,7 +28,7 @@ def get_or_create_token() -> str:
     token = str(uuid.uuid4())
     CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Atomic write: write to temp file then rename (prevents race on first run)
+    # Atomic write: write to temp file then rename
     import tempfile
     fd, tmp_path = tempfile.mkstemp(dir=CREDENTIALS_FILE.parent, prefix=".maple_cred_")
     try:
@@ -37,9 +37,14 @@ def get_or_create_token() -> str:
         os.close(fd)
         os.replace(tmp_path, CREDENTIALS_FILE)
     except Exception:
-        os.close(fd) if not os.get_inheritable(fd) else None
-        if os.path.exists(tmp_path):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
             os.unlink(tmp_path)
+        except OSError:
+            pass
         # Fallback: direct write
         CREDENTIALS_FILE.write_text(token)
         try:

@@ -97,32 +97,20 @@ atexit.register(_cleanup_all)
 # Schedule periodic idle cleanup
 import asyncio as _asyncio
 
+_cleanup_task = None
+
+async def _ensure_cleanup_running():
+    """Start the idle cleanup background task if not already running."""
+    global _cleanup_task
+    if _cleanup_task is None or _cleanup_task.done():
+        _cleanup_task = _asyncio.create_task(_idle_cleanup_loop())
+
 async def _idle_cleanup_loop():
     """Background task: reap idle sessions every 5 minutes."""
     from maple.sessions import cleanup_idle_sessions
     while True:
         await _asyncio.sleep(300)  # Check every 5 minutes
         await cleanup_idle_sessions(max_idle_seconds=1800)  # 30 min idle = reap
-
-
-@mcp.custom_route("/startup_cleanup", methods=["GET"])
-async def _start_cleanup_task(request: Request) -> JSONResponse:
-    """Internal: starts the idle cleanup task on first request."""
-    return JSONResponse({"status": "ok"})
-
-
-# Start cleanup task when the server event loop is ready
-import contextlib
-
-@contextlib.asynccontextmanager
-async def _lifespan(app):
-    task = _asyncio.create_task(_idle_cleanup_loop())
-    yield
-    task.cancel()
-    try:
-        await task
-    except _asyncio.CancelledError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -247,14 +235,10 @@ async def start_experiment(name: str, description: str, ctx: Context) -> dict:
         name: Experiment name
         description: Experiment description
     """
-    from maple.sessions import create_session, get_session_optional
+    from maple.sessions import create_session
 
-    # Check if already has an active experiment
-    existing = await get_session_optional(ctx)
-    if existing:
-        raise ToolError(
-            "An experiment is already active. Call end_experiment first."
-        )
+    # Ensure idle cleanup background task is running
+    await _ensure_cleanup_running()
 
     app = ExperimentApplication(
         experiment_design=ExperimentDesign(
