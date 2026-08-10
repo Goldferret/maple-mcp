@@ -96,23 +96,51 @@ def _do_serve(agent: str = None, stub: bool = False, dev: bool = False, config: 
 @chat_app.command("operator")
 def chat_operator(
     host: str = typer.Option("localhost", help="Agent service host"),
+    resume: bool = typer.Option(False, "--resume", help="Resume most recent operator session"),
 ):
     """Chat with the Operator agent."""
     from dotenv import load_dotenv
     load_dotenv()
     from maple.tui import run_chat
-    run_chat(agent="operator", host=host)
+    session_id = _get_session_id("operator", resume)
+    run_chat(agent="operator", host=host, session_id=session_id)
 
 
 @chat_app.command("overseer")
 def chat_overseer(
     host: str = typer.Option("localhost", help="Agent service host"),
+    resume: bool = typer.Option(False, "--resume", help="Resume most recent overseer session"),
 ):
     """Chat with the Overseer agent."""
     from dotenv import load_dotenv
     load_dotenv()
     from maple.tui import run_chat
-    run_chat(agent="overseer", host=host)
+    session_id = _get_session_id("overseer", resume)
+    run_chat(agent="overseer", host=host, session_id=session_id)
+
+
+def _get_session_id(agent: str, resume: bool) -> str:
+    """Get or create a session ID for the chat.
+    
+    If resume=True, finds the most recent session file for the agent.
+    Otherwise generates a new UUID.
+    """
+    import uuid
+    from pathlib import Path
+
+    sessions_dir = Path.home() / ".maple" / "sessions" / agent
+
+    if resume and sessions_dir.exists():
+        json_files = list(sessions_dir.glob("*.json"))
+        if json_files:
+            latest = max(json_files, key=lambda f: f.stat().st_mtime)
+            session_id = latest.stem
+            console.print(f"[dim]Resuming session: {session_id[:8]}...[/dim]")
+            return session_id
+        else:
+            console.print("[dim]No previous session found. Starting new.[/dim]")
+
+    return str(uuid.uuid4())
 
 
 # ---------------------------------------------------------------------------

@@ -77,13 +77,13 @@ class MapleChatApp(App):
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, agent: str = "operator", host: str = "localhost", **kwargs):
+    def __init__(self, agent: str = "operator", host: str = "localhost", session_id: str = None, **kwargs):
         super().__init__(**kwargs)
         self._agent = agent
         self._port = AGENT_PORTS.get(agent, 8202)
         self._host = host
         self._base_url = f"http://{host}:{self._port}"
-        self._session_id = str(uuid.uuid4())
+        self._session_id = session_id or str(uuid.uuid4())
         self._client: httpx.AsyncClient | None = None
 
     def compose(self) -> ComposeResult:
@@ -224,7 +224,8 @@ class MapleChatApp(App):
 # ---------------------------------------------------------------------------
 
 
-def run_chat(agent: str = "operator", host: str = "localhost"):
+def run_chat(agent: str = "operator", host: str = "localhost", session_id: str = None):
     """Launch the MAPLE chat TUI."""
-    app = MapleChatApp(agent=agent, host=host)
+    import uuid
+    app = MapleChatApp(agent=agent, host=host, session_id=session_id or str(uuid.uuid4()))
     app.run()

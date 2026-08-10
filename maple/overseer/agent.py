@@ -20,7 +20,8 @@ from mcp.client.streamable_http import streamable_http_client
 
 MCP_OVERSEER_URL = os.getenv("MCP_OVERSEER_URL", "http://localhost:8103/mcp")
 SESSIONS_DIR = Path(os.getenv("MAPLE_SESSIONS_DIR", str(Path.home() / ".maple" / "sessions")))
-SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+OVERSEER_SESSIONS_DIR = SESSIONS_DIR / "overseer"
+OVERSEER_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 
@@ -97,7 +98,7 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
         hooks=hooks if hooks else None,
         session_manager=FileSessionManager(
             session_id=session_id,
-            storage_dir=str(SESSIONS_DIR),
+            storage_dir=str(OVERSEER_SESSIONS_DIR),
         ),
     )
     return agent
