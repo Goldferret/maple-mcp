@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "maple-mcp"
+version = "0.1.0"
+description = "Model-Agnostic Platform for Laboratory Experiments — LLM agents for autonomous MADSci experiments via MCP"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Gabriel Ferrer"},
+]
+keywords = ["mcp", "madsci", "llm", "robotics", "autonomous-lab", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "madsci.client>=0.5.0,<0.6.0",
+    "madsci.common>=0.5.0,<0.6.0",
+    "madsci.experiment_application>=0.5.0,<0.6.0",
+    "madsci.node_module>=0.5.0,<0.6.0",
+    "strands-agents[anthropic,ollama]>=1.0.0",
+    "fastmcp>=2.0.0",
+    "openai>=1.0.0",
+    "typer>=0.9.0",
+    "python-dotenv>=1.0.0",
+    "httpx>=0.24.0",
+    "uvicorn>=0.20.0",
+    "fastapi>=0.100.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24.0",
+    "rich>=13.0.0",
+    "textual>=4.0.0",
+    "watchfiles>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+maple = "maple.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/gabrielferrer/maple-mcp"
+Repository = "https://github.com/gabrielferrer/maple-mcp"
+Issues = "https://github.com/gabrielferrer/maple-mcp/issues"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires running MAPLE services (deselected by default)",
+]
+asyncio_mode = "auto"
+
+[tool.hatch.build.targets.wheel]
+packages = ["maple"]

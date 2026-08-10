@@ -1,0 +1,26 @@
+# MAPLE Configuration — Block Sorting Demo
+# Uses ExampleVision (hardcoded detections) and a post-action hook.
+
+experiment:
+  name: Block Sorting Demo
+  objective: Sort colored blocks into assigned goal zones by color
+  constraints:
+    - "Only pick one block at a time"
+    - "Red blocks go to goal zone 1, blue blocks go to goal zone 2"
+
+operator:
+  vision_backend: "vision:ExampleVision"
+
+  # Custom tools to register with the MCP server (module:function format)
+  # These are loaded at startup and available to the LLM agent.
+  custom_tools: []
+  # custom_tools:
+  #   - "my_tools:prepare_sample"
+  #   - "my_tools:measure_volume"
+
+  # After each robot action, call StubBot's analyze action for verification
+  post_action_hooks:
+    - node: StubBot
+      action: analyze
+      args:
+        task_description: "Verify placement accuracy"

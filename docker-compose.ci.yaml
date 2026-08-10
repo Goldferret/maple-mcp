@@ -1,0 +1,100 @@
+name: maple_ci
+
+# Minimal MADSci stack for MAPLE integration tests.
+# No lab dashboard, no minio — just the managers needed for E2E testing.
+
+x-madsci-service: &madsci-service
+  image: ghcr.io/ad-sdl/madsci:v0.5.0
+  network_mode: host
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  environment:
+    - USER_ID=1000
+    - GROUP_ID=1000
+  restart: "no"
+
+services:
+  # === DATABASES ===
+
+  mongodb:
+    container_name: mongodb
+    image: mongo:8.0
+    network_mode: host
+    volumes:
+      - mongodb_data:/data/db
+
+  redis:
+    container_name: redis
+    image: redis:7.4
+    network_mode: host
+    command: redis-server --appendonly yes
+
+  postgres:
+    container_name: postgres
+    image: postgres:17
+    network_mode: host
+    environment:
+      - POSTGRES_USER=madsci
+      - POSTGRES_PASSWORD=madsci
+      - POSTGRES_DB=resources
+
+  # === MANAGERS ===
+
+  event_manager:
+    <<: *madsci-service
+    container_name: event_manager
+    command: python -m madsci.event_manager.event_server --host 0.0.0.0 --port 8001
+    depends_on:
+      - mongodb
+
+  resource_manager:
+    <<: *madsci-service
+    container_name: resource_manager
+    command: python -m madsci.resource_manager.resource_server --host 0.0.0.0 --port 8003
+    depends_on:
+      - postgres
+      - event_manager
+
+  data_manager:
+    <<: *madsci-service
+    container_name: data_manager
+    command: python -m madsci.data_manager.data_server --host 0.0.0.0 --port 8004
+    depends_on:
+      - mongodb
+      - event_manager
+
+  experiment_manager:
+    <<: *madsci-service
+    container_name: experiment_manager
+    command: python -m madsci.experiment_manager.experiment_server --host 0.0.0.0 --port 8002
+    depends_on:
+      - mongodb
+      - event_manager
+
+  workcell_manager:
+    <<: *madsci-service
+    container_name: workcell_manager
+    command: python -m madsci.workcell_manager.workcell_server --host 0.0.0.0 --port 8005
+    environment:
+      - USER_ID=1000
+      - GROUP_ID=1000
+      - LOCATION_SERVER_URL=http://localhost:8006/
+      - RESOURCE_SERVER_URL=http://localhost:8003/
+      - EVENT_SERVER_URL=http://localhost:8001/
+      - DATA_SERVER_URL=http://localhost:8004/
+    depends_on:
+      - redis
+      - mongodb
+      - resource_manager
+      - event_manager
+      - postgres
+
+  location_manager:
+    <<: *madsci-service
+    container_name: location_manager
+    command: python -m madsci.location_manager.location_server --host 0.0.0.0 --port 8006
+    depends_on:
+      - redis
+
+volumes:
+  mongodb_data:

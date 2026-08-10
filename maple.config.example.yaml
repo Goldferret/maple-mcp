@@ -1,0 +1,24 @@
+# MAPLE Configuration Example
+# Copy to maple.config.yaml and customize for your experiment.
+# One config file per experiment type.
+
+experiment:
+  name: Block Sorting Experiment
+  objective: Sort colored blocks into assigned goal zones by color
+  constraints:
+    - "Never place two blocks at same coordinates. Offset by 40px."
+    - "Only pick one block at a time."
+
+operator:
+  # Path to your VisionBackend subclass (module:ClassName format).
+  # Leave empty to use StubBackend (no real detection).
+  vision_backend: "vision:BlockSortingVision"
+
+  # MADSci node actions to call after each Operator action.
+  # Example: Reason2 visual verification after every robot move.
+  post_action_hooks: []
+  # post_action_hooks:
+  #   - node: Reason2_Analysis
+  #     action: analyze_execution
+  #     args:
+  #       task_description: "from experiment objective"
