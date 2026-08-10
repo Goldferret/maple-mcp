@@ -119,8 +119,14 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         session_id: Unique session identifier for conversation history.
         extra_hooks: Additional Strands HookProvider instances to attach.
     """
+    from maple.auth import get_or_create_token
+
     model = _create_model()
-    mcp_client = MCPClient(lambda: streamable_http_client(MCP_OPERATOR_URL))
+    token = get_or_create_token()
+    mcp_client = MCPClient(lambda: streamable_http_client(
+        MCP_OPERATOR_URL,
+        headers={"Authorization": f"Bearer {token}"},
+    ))
     reasoning_hook = ReasoningCaptureHook(mcp_base_url=MCP_OPERATOR_URL)
 
     system_prompt = SYSTEM_PROMPT
