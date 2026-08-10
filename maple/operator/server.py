@@ -498,7 +498,7 @@ try:
     _config = load_config()
     _vision_backend = load_vision_backend(_config)
     _post_action_hooks = [
-        (h.node, h.action, h.args) for h in _config.operator.post_action_hooks
+        {"node": h.node, "action": h.action, "args": h.args} for h in _config.operator.post_action_hooks
     ]
     load_custom_tools(_config)
 except Exception:

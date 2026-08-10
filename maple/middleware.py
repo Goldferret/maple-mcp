@@ -17,7 +17,7 @@ class AuthMiddleware(Middleware):
     """
 
     async def on_call_tool(self, context: MiddlewareContext, call_next):
-        headers = get_http_headers()
+        headers = get_http_headers(include={"authorization"})
         authorization = headers.get("authorization", "")
 
         scheme, _, token = authorization.partition(" ")
