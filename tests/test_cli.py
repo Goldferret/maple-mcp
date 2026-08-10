@@ -10,7 +10,7 @@ runner = CliRunner()
 
 class TestHelp:
     def test_main_help(self):
-        result = runner.invoke(app, ["--help"])
+        result = runner.invoke(app, ["--help"], color=False)
         assert result.exit_code == 0
         assert "MAPLE" in result.output
         assert "serve" in result.output
@@ -20,7 +20,7 @@ class TestHelp:
         assert "status" in result.output
 
     def test_serve_help(self):
-        result = runner.invoke(app, ["serve", "--help"])
+        result = runner.invoke(app, ["serve", "--help"], color=False)
         assert result.exit_code == 0
         assert "all" in result.output
         assert "operator" in result.output
@@ -29,33 +29,33 @@ class TestHelp:
         assert "mock" in result.output
 
     def test_serve_all_help(self):
-        result = runner.invoke(app, ["serve", "all", "--help"])
+        result = runner.invoke(app, ["serve", "all", "--help"], color=False)
         assert result.exit_code == 0
         assert "--dev" in result.output
         assert "--config" in result.output
 
     def test_chat_help(self):
-        result = runner.invoke(app, ["chat", "--help"])
+        result = runner.invoke(app, ["chat", "--help"], color=False)
         assert result.exit_code == 0
         assert "operator" in result.output
         assert "overseer" in result.output
 
     def test_down_help(self):
-        result = runner.invoke(app, ["down", "--help"])
+        result = runner.invoke(app, ["down", "--help"], color=False)
         assert result.exit_code == 0
 
     def test_logs_help(self):
-        result = runner.invoke(app, ["logs", "--help"])
+        result = runner.invoke(app, ["logs", "--help"], color=False)
         assert result.exit_code == 0
 
     def test_status_help(self):
-        result = runner.invoke(app, ["status", "--help"])
+        result = runner.invoke(app, ["status", "--help"], color=False)
         assert result.exit_code == 0
 
 
 class TestDown:
     def test_down_no_services(self):
-        result = runner.invoke(app, ["down"])
+        result = runner.invoke(app, ["down"], color=False)
         assert result.exit_code == 0
         assert "No running" in result.output
 
