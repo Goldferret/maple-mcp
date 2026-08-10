@@ -36,12 +36,14 @@ class OperatorConfig(BaseModel):
     vision_backend: str = ""  # "module:ClassName" or empty for StubBackend
     custom_tools: list[str] = []  # ["module:function_name", ...] to register at startup
     post_action_hooks: list[PostActionHook] = []
+    prompt: str = ""  # Path to custom prompt file, or empty for default
 
 
 class OverseerConfig(BaseModel):
     """Overseer agent configuration."""
 
     custom_tools: list[str] = []  # ["module:function_name", ...] to register at startup
+    prompt: str = ""  # Path to custom prompt file, or empty for default
 
 
 class MapleConfig(BaseModel):

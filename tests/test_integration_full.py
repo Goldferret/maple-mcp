@@ -27,12 +27,18 @@ pytestmark = pytest.mark.integration
 # ---------------------------------------------------------------------------
 
 
-async def call_tool(url: str, tool_name: str, arguments: dict) -> dict:
+async def call_tool(url: str, tool_name: str, arguments: dict, token: str = None) -> dict:
     """Call an MCP tool with a fresh session (avoids cancel scope issues)."""
+    import httpx
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
+    # Use deprecated streamablehttp_client which accepts headers directly
+    from mcp.client.streamable_http import streamablehttp_client
 
-    async with streamable_http_client(url) as (read, write, _):
+    kwargs = {}
+    if token:
+        kwargs["headers"] = {"Authorization": f"Bearer {token}"}
+
+    async with streamablehttp_client(url, **kwargs) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool(tool_name, arguments)
@@ -41,6 +47,11 @@ async def call_tool(url: str, tool_name: str, arguments: dict) -> dict:
                 if hasattr(content, "text"):
                     text += content.text
             return {"text": text, "error": result.isError}
+
+
+# Shared test token for operator tools
+import uuid
+TEST_TOKEN = str(uuid.uuid4())
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +217,7 @@ class TestOperatorTools:
         start_r = await call_tool(OPERATOR_URL, "start_experiment", {
             "name": "CI Test Experiment",
             "description": "Integration test",
-        })
+        }, token=TEST_TOKEN)
         assert not start_r["error"], start_r["text"]
         data = json.loads(start_r["text"])
         exp_id = data["experiment_id"]
@@ -218,7 +229,7 @@ class TestOperatorTools:
                 "node_name": "StubBot",
                 "action_name": "pick_and_place",
                 "parameters": {"pick_x": 100, "pick_y": 100, "place_x": 200, "place_y": 200},
-            })
+            }, token=TEST_TOKEN)
             if not action_r["error"]:
                 break
             await aio.sleep(5)
@@ -226,13 +237,13 @@ class TestOperatorTools:
         assert not action_r["error"], action_r["text"]
 
         # Verify sorting state (required before end_experiment)
-        verify_r = await call_tool(OPERATOR_URL, "verify", {})
+        verify_r = await call_tool(OPERATOR_URL, "verify", {}, token=TEST_TOKEN)
 
         # End experiment (may fail if verify errored — that's a vision backend issue, not lifecycle)
         end_r = await call_tool(OPERATOR_URL, "end_experiment", {
             "experiment_id": exp_id,
             "summary": "CI test completed",
-        })
+        }, token=TEST_TOKEN)
         if end_r["error"] and "verify" in end_r["text"]:
             # Gate requires successful verify — skip if vision not configured
             pass
@@ -244,8 +255,8 @@ class TestOperatorTools:
         """Test get_node_info (requires active experiment + node registered)."""
         await call_tool(OPERATOR_URL, "start_experiment", {
             "name": "Node Info Test", "description": "test",
-        })
-        r = await call_tool(OPERATOR_URL, "get_node_info", {"node_name": "StubBot"})
+        }, token=TEST_TOKEN)
+        r = await call_tool(OPERATOR_URL, "get_node_info", {"node_name": "StubBot"}, token=TEST_TOKEN)
         if r["error"] and "No info" in r["text"]:
             pytest.skip("StubBot info not yet available (workcell manager hasn't polled)")
         assert not r["error"], r["text"]
@@ -257,15 +268,15 @@ class TestOperatorTools:
         await call_tool(OPERATOR_URL, "start_experiment", {
             "name": "Constraints Test",
             "description": "test",
-        })
-        r = await call_tool(OPERATOR_URL, "get_robot_constraints", {"node_name": "StubBot"})
+        }, token=TEST_TOKEN)
+        r = await call_tool(OPERATOR_URL, "get_robot_constraints", {"node_name": "StubBot"}, token=TEST_TOKEN)
         # May not be implemented for stub — just check it doesn't crash
         assert r["text"] is not None
         # Cleanup
         await call_tool(OPERATOR_URL, "end_experiment", {
             "experiment_id": "dummy",
             "summary": "cleanup",
-        })
+        }, token=TEST_TOKEN)
 
 
 # ---------------------------------------------------------------------------

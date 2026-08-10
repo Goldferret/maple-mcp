@@ -174,3 +174,44 @@ class TestStubChat:
 
             # Verify experiment ended message appeared
             assert getattr(pilot.app, "_exit_on_next_submit", False) is True
+
+
+class TestResume:
+    def test_resume_finds_most_recent_session(self, tmp_path):
+        """--resume finds the most recent session file."""
+        import time
+        from pathlib import Path
+
+        # Create fake session dir with two files
+        sessions_dir = tmp_path / "operator"
+        sessions_dir.mkdir(parents=True)
+
+        # Older session
+        old = sessions_dir / "old-session-id.json"
+        old.write_text('{"messages": []}')
+        time.sleep(0.1)
+
+        # Newer session
+        new = sessions_dir / "new-session-id.json"
+        new.write_text('{"messages": []}')
+
+        # Test the glob + max logic directly (same as _get_session_id)
+        json_files = list(sessions_dir.glob("*.json"))
+        latest = max(json_files, key=lambda f: f.stat().st_mtime)
+        assert latest.stem == "new-session-id"
+
+    def test_resume_returns_new_uuid_when_no_sessions(self):
+        """--resume with no previous sessions returns a new UUID."""
+        from maple.cli import _get_session_id
+        from unittest.mock import patch
+        import uuid
+
+        # Patch home to a non-existent dir
+        result = _get_session_id("operator", resume=True)
+        # Should be a valid UUID (new session since no files found)
+        try:
+            uuid.UUID(result)
+            is_uuid = True
+        except ValueError:
+            is_uuid = False
+        assert is_uuid

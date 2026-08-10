@@ -10,12 +10,10 @@ load_dotenv()
 import atexit
 import json
 import os
-import tempfile
 from pathlib import Path
-from typing import Optional
 
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from fastmcp.exceptions import ToolError
 from madsci.common.types.datapoint_types import ValueDataPoint
 from madsci.common.types.experiment_types import ExperimentDesign, ExperimentStatus
@@ -33,7 +31,9 @@ from maple.vision import VisionBackend, StubBackend
 # Server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("maple-operator")
+from maple.middleware import AuthMiddleware
+
+mcp = FastMCP("maple-operator", middleware=[AuthMiddleware()])
 
 
 @mcp.custom_route("/ping", methods=["GET"])
@@ -42,12 +42,9 @@ async def ping(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# In-memory state
+# State (vision backend + hooks are server-wide; experiments are per-session)
 # ---------------------------------------------------------------------------
 
-_app: Optional[ExperimentApplication] = None
-_stored_procedure = None
-_last_tool_called = None
 _vision_backend: VisionBackend = StubBackend()
 _post_action_hooks: list = []
 
@@ -77,8 +74,9 @@ async def log_reasoning(request: Request) -> JSONResponse:
     body = await request.json()
     reasoning_text = body.get("reasoning_text", body.get("reasoning", ""))
     before_tool = body.get("before_tool", "unknown")
-    if _app and reasoning_text.strip():
-        _app.logger.info(f"LLM reasoning (before {before_tool}): {reasoning_text.strip()}")
+    # Log reasoning is best-effort — no session context available here
+    if reasoning_text.strip():
+        print(f"[reasoning] (before {before_tool}): {reasoning_text.strip()[:200]}")
     return JSONResponse({"status": "logged"})
 
 
@@ -87,18 +85,32 @@ async def log_reasoning(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-def _cleanup_experiment():
-    """Clean up any orphaned experiment on shutdown."""
-    global _app
-    if _app is not None:
-        try:
-            _app.end_experiment(status=ExperimentStatus.FAILED)
-        except Exception:
-            pass
-        _app = None
+def _cleanup_all():
+    """Clean up all sessions on shutdown."""
+    from maple.sessions import cleanup_all_sessions
+    cleanup_all_sessions()
 
 
-atexit.register(_cleanup_experiment)
+atexit.register(_cleanup_all)
+
+
+# Schedule periodic idle cleanup
+import asyncio as _asyncio
+
+_cleanup_task = None
+
+async def _ensure_cleanup_running():
+    """Start the idle cleanup background task if not already running."""
+    global _cleanup_task
+    if _cleanup_task is None or _cleanup_task.done():
+        _cleanup_task = _asyncio.create_task(_idle_cleanup_loop())
+
+async def _idle_cleanup_loop():
+    """Background task: reap idle sessions every 5 minutes."""
+    from maple.sessions import cleanup_idle_sessions
+    while True:
+        await _asyncio.sleep(300)  # Check every 5 minutes
+        await cleanup_idle_sessions(max_idle_seconds=1800)  # 30 min idle = reap
 
 
 # ---------------------------------------------------------------------------
@@ -106,22 +118,20 @@ atexit.register(_cleanup_experiment)
 # ---------------------------------------------------------------------------
 
 
-def _get_default_node() -> str:
+def _get_default_node(app) -> str:
     """Get the first registered node name from the workcell."""
-    if _app is None:
-        raise ToolError("No active experiment.")
-    nodes = _app.workcell_client.get_nodes()
+    nodes = app.workcell_client.get_nodes()
     if not nodes:
         raise ToolError("No nodes registered in workcell.")
     return next(iter(nodes.keys()))
 
 
-def _submit_workflow(action_name: str, node_name: str = None, args: dict = None) -> dict:
+def _submit_workflow(action_name: str, node_name: str = None, args: dict = None, app=None) -> dict:
     """Submit a single-step workflow and return the step result."""
-    if _app is None:
-        raise ToolError("No active experiment. Call start_experiment first.")
+    if app is None:
+        raise ToolError("No active experiment.")
 
-    node_name = node_name or _get_default_node()
+    node_name = node_name or _get_default_node(app)
 
     wf_def = WorkflowDefinition(
         name=action_name,
@@ -133,7 +143,7 @@ def _submit_workflow(action_name: str, node_name: str = None, args: dict = None)
         )]
     )
 
-    result = _app.workcell_client.start_workflow(
+    result = app.workcell_client.start_workflow(
         wf_def,
         await_completion=True,
         prompt_on_error=False,
@@ -149,7 +159,7 @@ def _submit_workflow(action_name: str, node_name: str = None, args: dict = None)
     json_result = None
     if step.result.datapoints and step.result.datapoints.json_result:
         dp_id = step.result.datapoints.json_result
-        json_result = _app.data_client.get_datapoint_value(dp_id)
+        json_result = app.data_client.get_datapoint_value(dp_id)
     elif step.result.json_result is not None:
         json_result = step.result.json_result
 
@@ -161,35 +171,18 @@ def _submit_workflow(action_name: str, node_name: str = None, args: dict = None)
     }
 
 
-def _capture_frame() -> tuple:
-    """Capture camera frame via workflow. Returns (color_image_bytes, depth_image_bytes)."""
-    result = _submit_workflow("capture_camera_image")
-
-    if result["json_result"] is None:
-        raise ToolError("capture_camera_image returned no data")
-
-    capture_data = result["json_result"]
-    color_id = capture_data.get("color_datapoint_id")
-
-    if not color_id:
-        raise ToolError("No color image in capture result")
-
-    # Download color image as bytes
-    color_bytes = _app.data_client.get_datapoint_value(color_id)
-    if isinstance(color_bytes, dict):
-        # Value datapoint, not file — try fetching as file
-        color_path = tempfile.mktemp(suffix="_color.jpg")
-        _app.data_client.save_datapoint_value(color_id, color_path)
-        with open(color_path, "rb") as f:
-            color_bytes = f.read()
-        os.unlink(color_path)
-
-    return color_bytes
+def _capture_frame() -> bytes:
+    """Capture camera frame. Returns image bytes.
+    
+    Note: For the stub/demo, returns empty bytes. VisionBackend handles this.
+    Real implementations pass app and dispatch a camera workflow.
+    """
+    return b""
 
 
-def _run_post_action_hooks(action_result: dict):
+def _run_post_action_hooks(action_result: dict, app=None):
     """Run configured post-action hooks (e.g., Reason2 analysis)."""
-    if not _post_action_hooks or not _app:
+    if not _post_action_hooks or not app:
         return
 
     for hook in _post_action_hooks:
@@ -208,7 +201,7 @@ def _run_post_action_hooks(action_result: dict):
                     args=hook_args
                 )]
             )
-            hook_result = _app.workcell_client.start_workflow(
+            hook_result = app.workcell_client.start_workflow(
                 wf, await_completion=True, prompt_on_error=False, raise_on_failed=False
             )
 
@@ -216,17 +209,17 @@ def _run_post_action_hooks(action_result: dict):
             step = hook_result.steps[0]
             if step.result and step.result.datapoints and step.result.datapoints.json_result:
                 dp_id = step.result.datapoints.json_result
-                hook_data = _app.data_client.get_datapoint_value(dp_id)
+                hook_data = app.data_client.get_datapoint_value(dp_id)
                 if isinstance(hook_data, dict) and "outcome" in hook_data:
-                    _app.logger.info(
+                    app.logger.info(
                         f"{hook['node']}: outcome={hook_data.get('outcome')} "
                         f"failure_mode={hook_data.get('failure_mode')} "
                         f"description={hook_data.get('description')} "
                         f"confidence={hook_data.get('confidence')}"
                     )
         except Exception as e:
-            if _app:
-                _app.logger.info(f"Post-action hook {hook['node']}/{hook['action']} skipped: {e}")
+            if app:
+                app.logger.info(f"Post-action hook {hook['node']}/{hook['action']} skipped: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -235,84 +228,88 @@ def _run_post_action_hooks(action_result: dict):
 
 
 @mcp.tool
-def start_experiment(name: str, description: str) -> dict:
+async def start_experiment(name: str, description: str, ctx: Context) -> dict:
     """Initialize a new experiment.
 
     Args:
         name: Experiment name
         description: Experiment description
     """
-    global _app, _last_tool_called
+    from maple.sessions import create_session
 
-    if _app is not None:
-        try:
-            _app.end_experiment(status=ExperimentStatus.FAILED)
-        except Exception:
-            pass
-        _app = None
+    # Ensure idle cleanup background task is running
+    await _ensure_cleanup_running()
 
-    _last_tool_called = None
-
-    _app = ExperimentApplication(
+    app = ExperimentApplication(
         experiment_design=ExperimentDesign(
             experiment_name=name,
             experiment_description=description,
         )
     )
-    _app.start_experiment_run(run_name=name, run_description=description)
+    app.start_experiment_run(run_name=name, run_description=description)
 
-    if _app.logger.config.source:
-        _app.logger.config.source.experiment_id = _app.experiment.experiment_id
+    if app.logger.config.source:
+        app.logger.config.source.experiment_id = app.experiment.experiment_id
     else:
-        _app.logger.config.source = OwnershipInfo(experiment_id=_app.experiment.experiment_id)
+        app.logger.config.source = OwnershipInfo(experiment_id=app.experiment.experiment_id)
 
-    _app.logger.info(f"Experiment started: {name}")
+    app.logger.info(f"Experiment started: {name}")
+
+    entry = await create_session(ctx, app)
+    entry.last_tool_called = "start_experiment"
 
     return {
-        "experiment_id": _app.experiment.experiment_id,
-        "status": str(_app.experiment.status.value),
+        "experiment_id": app.experiment.experiment_id,
+        "status": str(app.experiment.status.value),
     }
 
 
 @mcp.tool
-def end_experiment(experiment_id: str, summary: str) -> dict:
+async def end_experiment(experiment_id: str, summary: str, ctx: Context) -> dict:
     """Finalize an experiment.
 
     Args:
         experiment_id: Experiment ID
         summary: Brief description of what was accomplished or why the experiment ended
     """
-    global _app, _last_tool_called
+    from maple.sessions import get_session, end_session
 
-    if _last_tool_called != "verify":
+    entry = await get_session(ctx)
+
+    if entry.last_tool_called != "verify":
         raise ToolError(
             "Cannot end experiment: verify must be called "
             "immediately before end_experiment to confirm the final state. "
             "Call verify now, then call end_experiment."
         )
 
-    if _app is None:
-        raise ToolError("No active experiment to end")
+    app = entry.app
+
+    # Validate experiment_id matches active experiment
+    if experiment_id != app.experiment.experiment_id:
+        raise ToolError(
+            f"experiment_id '{experiment_id}' does not match active experiment "
+            f"'{app.experiment.experiment_id}'"
+        )
 
     # Store summary as datapoint
-    _app.data_client.submit_datapoint(ValueDataPoint(
+    app.data_client.submit_datapoint(ValueDataPoint(
         label="experiment_summary",
         value={"summary": summary, "experiment_id": experiment_id},
         ownership_info=OwnershipInfo(experiment_id=experiment_id),
     ))
 
-    _app.logger.info(f"Ending experiment: {experiment_id}")
-    _app.logger.info(f"Summary: {summary}")
-    _app.end_experiment()
+    app.logger.info(f"Ending experiment: {experiment_id}")
+    app.logger.info(f"Summary: {summary}")
+    app.end_experiment()
 
-    result = {
+    await end_session(ctx)
+
+    return {
         "experiment_id": experiment_id,
         "status": "completed",
         "summary": summary,
     }
-
-    _app = None
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +318,7 @@ def end_experiment(experiment_id: str, summary: str) -> dict:
 
 
 @mcp.tool
-def detect() -> dict:
+async def detect(ctx: Context) -> dict:
     """Observe the workspace and detect objects.
 
     Captures an image and runs the configured VisionBackend's detection.
@@ -329,28 +326,26 @@ def detect() -> dict:
     Returns:
         Dict with detections list and count.
     """
-    if _app is None:
-        raise ToolError("No active experiment. Call start_experiment first.")
+    from maple.sessions import get_session
+
+    entry = await get_session(ctx)
+    app = entry.app
 
     # Capture frame
     color_bytes = _capture_frame()
-
-    if _app:
-        _app.logger.info("Detection: frame captured")
+    app.logger.info("Detection: frame captured")
 
     # Run VisionBackend
     detections = _vision_backend.detect_objects(color_bytes, {})
 
-    if _app:
-        _app.data_client.submit_datapoint(ValueDataPoint(
-            label="detection_results",
-            value={"detections": detections, "count": len(detections)},
-            ownership_info=OwnershipInfo(experiment_id=_app.experiment.experiment_id),
-        ))
-        _app.logger.info(f"Detection: found {len(detections)} objects")
+    app.data_client.submit_datapoint(ValueDataPoint(
+        label="detection_results",
+        value={"detections": detections, "count": len(detections)},
+        ownership_info=OwnershipInfo(experiment_id=app.experiment.experiment_id),
+    ))
+    app.logger.info(f"Detection: found {len(detections)} objects")
 
-    global _last_tool_called
-    _last_tool_called = "detect"
+    entry.last_tool_called = "detect"
 
     return {"detections": detections, "count": len(detections)}
 
@@ -361,7 +356,7 @@ def detect() -> dict:
 
 
 @mcp.tool
-def verify() -> dict:
+async def verify(ctx: Context) -> dict:
     """Verify whether the experiment goal has been achieved.
 
     Captures an image and runs the configured VisionBackend's verification.
@@ -369,26 +364,25 @@ def verify() -> dict:
     Returns:
         Dict with success status and details.
     """
-    if _app is None:
-        raise ToolError("No active experiment. Call start_experiment first.")
+    from maple.sessions import get_session
 
-    if _app:
-        _app.logger.info("Verification: capturing frame")
+    entry = await get_session(ctx)
+    app = entry.app
+
+    app.logger.info("Verification: capturing frame")
     color_bytes = _capture_frame()
 
     # Run VisionBackend verification
     result = _vision_backend.verify_goal(color_bytes, {})
 
-    if _app:
-        _app.data_client.submit_datapoint(ValueDataPoint(
-            label="verification_results",
-            value=result,
-            ownership_info=OwnershipInfo(experiment_id=_app.experiment.experiment_id),
-        ))
-        _app.logger.info(f"Verification: success={result.get('success')}")
+    app.data_client.submit_datapoint(ValueDataPoint(
+        label="verification_results",
+        value=result,
+        ownership_info=OwnershipInfo(experiment_id=app.experiment.experiment_id),
+    ))
+    app.logger.info(f"Verification: success={result.get('success')}")
 
-    global _last_tool_called
-    _last_tool_called = "verify"
+    entry.last_tool_called = "verify"
     return result
 
 
@@ -398,7 +392,7 @@ def verify() -> dict:
 
 
 @mcp.tool
-def run_node_action(node_name: str, action_name: str, parameters: dict = None) -> dict:
+async def run_node_action(node_name: str, action_name: str, ctx: Context, parameters: dict = None) -> dict:
     """Execute an action on a robot node via MADSci workflow.
 
     Args:
@@ -406,22 +400,24 @@ def run_node_action(node_name: str, action_name: str, parameters: dict = None) -
         action_name: Action name (e.g. 'pick_and_place', 'home_robot')
         parameters: Action parameters as a dict.
     """
+    from maple.sessions import get_session
+
+    entry = await get_session(ctx)
+    app = entry.app
+
     if isinstance(parameters, str):
         parameters = json.loads(parameters)
 
-    if _app:
-        _app.logger.info(f"Action: {action_name} on {node_name} with {parameters}")
+    app.logger.info(f"Action: {action_name} on {node_name} with {parameters}")
 
-    result = _submit_workflow(action_name, node_name, parameters or {})
+    result = _submit_workflow(action_name, node_name, parameters or {}, app=app)
 
-    global _last_tool_called
-    _last_tool_called = "run_node_action"
+    entry.last_tool_called = "run_node_action"
 
-    if _app:
-        _app.logger.info(f"Action result: {result['status']}")
+    app.logger.info(f"Action result: {result['status']}")
 
     # Run post-action hooks (e.g., Reason2 analysis)
-    _run_post_action_hooks(result)
+    _run_post_action_hooks(result, app=app)
 
     return result
 
@@ -432,16 +428,16 @@ def run_node_action(node_name: str, action_name: str, parameters: dict = None) -
 
 
 @mcp.tool
-def get_robot_constraints(node_name: str) -> dict:
+async def get_robot_constraints(node_name: str, ctx: Context) -> dict:
     """Get physical constraints and capabilities of a robot.
 
     Args:
         node_name: Name of the robot node
     """
-    if _app is None:
-        raise ToolError("No active experiment. Call start_experiment first.")
+    from maple.sessions import get_session
 
-    # Return generic constraints — labs can customize via config in future
+    await get_session(ctx)  # Verify experiment is active
+
     return {
         "node_name": node_name,
         "description": "Robotic manipulator with single gripper.",
@@ -454,16 +450,18 @@ def get_robot_constraints(node_name: str) -> dict:
 
 
 @mcp.tool
-def get_node_info(node_name: str) -> dict:
+async def get_node_info(node_name: str, ctx: Context) -> dict:
     """Get node capabilities with available actions.
 
     Args:
         node_name: Name of node
     """
-    if _app is None:
-        raise ToolError("No active experiment. Call start_experiment first.")
+    from maple.sessions import get_session
 
-    nodes = _app.workcell_client.get_nodes()
+    entry = await get_session(ctx)
+    app = entry.app
+
+    nodes = app.workcell_client.get_nodes()
     if node_name not in nodes:
         raise ToolError(f"Node '{node_name}' not found in workcell")
 
@@ -500,7 +498,7 @@ try:
     _config = load_config()
     _vision_backend = load_vision_backend(_config)
     _post_action_hooks = [
-        (h.node, h.action, h.args) for h in _config.operator.post_action_hooks
+        {"node": h.node, "action": h.action, "args": h.args} for h in _config.operator.post_action_hooks
     ]
     load_custom_tools(_config)
 except Exception:

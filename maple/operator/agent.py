@@ -22,9 +22,21 @@ from mcp.client.streamable_http import streamable_http_client
 
 MCP_OPERATOR_URL = os.getenv("MCP_OPERATOR_URL", "http://localhost:8102/mcp")
 SESSIONS_DIR = Path(os.getenv("MAPLE_SESSIONS_DIR", str(Path.home() / ".maple" / "sessions")))
-SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+OPERATOR_SESSIONS_DIR = SESSIONS_DIR / "operator"
+OPERATOR_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
+
+# Load custom prompt from config if specified
+try:
+    from maple.config import load_config
+    _cfg = load_config()
+    if _cfg.operator.prompt:
+        _custom_prompt_path = Path(_cfg.operator.prompt)
+        if _custom_prompt_path.exists():
+            SYSTEM_PROMPT = _custom_prompt_path.read_text()
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +131,14 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         session_id: Unique session identifier for conversation history.
         extra_hooks: Additional Strands HookProvider instances to attach.
     """
+    from maple.auth import get_or_create_token
+
     model = _create_model()
-    mcp_client = MCPClient(lambda: streamable_http_client(MCP_OPERATOR_URL))
+    token = get_or_create_token()
+    mcp_client = MCPClient(lambda: streamable_http_client(
+        MCP_OPERATOR_URL,
+        headers={"Authorization": f"Bearer {token}"},
+    ))
     reasoning_hook = ReasoningCaptureHook(mcp_base_url=MCP_OPERATOR_URL)
 
     system_prompt = SYSTEM_PROMPT
@@ -143,7 +161,7 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         tool_executor=SequentialToolExecutor(),
         session_manager=FileSessionManager(
             session_id=session_id,
-            storage_dir=str(SESSIONS_DIR),
+            storage_dir=str(OPERATOR_SESSIONS_DIR),
         ),
     )
     agent._reasoning_hook = reasoning_hook
