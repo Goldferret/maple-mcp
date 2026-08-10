@@ -94,6 +94,37 @@ def _cleanup_all():
 atexit.register(_cleanup_all)
 
 
+# Schedule periodic idle cleanup
+import asyncio as _asyncio
+
+async def _idle_cleanup_loop():
+    """Background task: reap idle sessions every 5 minutes."""
+    from maple.sessions import cleanup_idle_sessions
+    while True:
+        await _asyncio.sleep(300)  # Check every 5 minutes
+        await cleanup_idle_sessions(max_idle_seconds=1800)  # 30 min idle = reap
+
+
+@mcp.custom_route("/startup_cleanup", methods=["GET"])
+async def _start_cleanup_task(request: Request) -> JSONResponse:
+    """Internal: starts the idle cleanup task on first request."""
+    return JSONResponse({"status": "ok"})
+
+
+# Start cleanup task when the server event loop is ready
+import contextlib
+
+@contextlib.asynccontextmanager
+async def _lifespan(app):
+    task = _asyncio.create_task(_idle_cleanup_loop())
+    yield
+    task.cancel()
+    try:
+        await task
+    except _asyncio.CancelledError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -246,7 +277,6 @@ async def start_experiment(name: str, description: str, ctx: Context) -> dict:
     return {
         "experiment_id": app.experiment.experiment_id,
         "status": str(app.experiment.status.value),
-        "fresh_context": True,
     }
 
 
@@ -270,6 +300,13 @@ async def end_experiment(experiment_id: str, summary: str, ctx: Context) -> dict
         )
 
     app = entry.app
+
+    # Validate experiment_id matches active experiment
+    if experiment_id != app.experiment.experiment_id:
+        raise ToolError(
+            f"experiment_id '{experiment_id}' does not match active experiment "
+            f"'{app.experiment.experiment_id}'"
+        )
 
     # Store summary as datapoint
     app.data_client.submit_datapoint(ValueDataPoint(
@@ -371,7 +408,7 @@ async def verify(ctx: Context) -> dict:
 
 
 @mcp.tool
-async def run_node_action(node_name: str, action_name: str, parameters: dict = None, ctx: Context = None) -> dict:
+async def run_node_action(node_name: str, action_name: str, ctx: Context, parameters: dict = None) -> dict:
     """Execute an action on a robot node via MADSci workflow.
 
     Args:
@@ -407,7 +444,7 @@ async def run_node_action(node_name: str, action_name: str, parameters: dict = N
 
 
 @mcp.tool
-async def get_robot_constraints(node_name: str, ctx: Context = None) -> dict:
+async def get_robot_constraints(node_name: str, ctx: Context) -> dict:
     """Get physical constraints and capabilities of a robot.
 
     Args:
@@ -429,7 +466,7 @@ async def get_robot_constraints(node_name: str, ctx: Context = None) -> dict:
 
 
 @mcp.tool
-async def get_node_info(node_name: str, ctx: Context = None) -> dict:
+async def get_node_info(node_name: str, ctx: Context) -> dict:
     """Get node capabilities with available actions.
 
     Args:

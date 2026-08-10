@@ -27,13 +27,25 @@ def get_or_create_token() -> str:
     # Generate new token
     token = str(uuid.uuid4())
     CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CREDENTIALS_FILE.write_text(token)
 
-    # Set file permissions to owner-only (0600)
+    # Atomic write: write to temp file then rename (prevents race on first run)
+    import tempfile
+    fd, tmp_path = tempfile.mkstemp(dir=CREDENTIALS_FILE.parent, prefix=".maple_cred_")
     try:
-        os.chmod(CREDENTIALS_FILE, 0o600)
-    except OSError:
-        pass  # Windows or permission issues — best effort
+        os.write(fd, token.encode())
+        os.fchmod(fd, 0o600)
+        os.close(fd)
+        os.replace(tmp_path, CREDENTIALS_FILE)
+    except Exception:
+        os.close(fd) if not os.get_inheritable(fd) else None
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        # Fallback: direct write
+        CREDENTIALS_FILE.write_text(token)
+        try:
+            os.chmod(CREDENTIALS_FILE, 0o600)
+        except OSError:
+            pass
 
     return token
 

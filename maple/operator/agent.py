@@ -26,6 +26,17 @@ SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompt.md").read_text()
 
+# Load custom prompt from config if specified
+try:
+    from maple.config import load_config
+    _cfg = load_config()
+    if _cfg.operator.prompt:
+        _custom_prompt_path = Path(_cfg.operator.prompt)
+        if _custom_prompt_path.exists():
+            SYSTEM_PROMPT = _custom_prompt_path.read_text()
+except Exception:
+    pass
+
 
 # ---------------------------------------------------------------------------
 # Hooks

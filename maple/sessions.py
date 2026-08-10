@@ -83,11 +83,12 @@ async def get_session_optional(ctx: Context) -> Optional["SessionEntry"]:
 async def create_session(ctx: Context, app) -> "SessionEntry":
     """Create a new session for the current user.
     
-    Rejects if an experiment is already active for this identity.
+    Atomically checks for existing session and reserves the slot before
+    the caller creates the ExperimentApplication. Prevents race conditions.
     
     Args:
         ctx: FastMCP Context
-        app: ExperimentApplication instance
+        app: ExperimentApplication instance (already created)
         
     Returns:
         The new SessionEntry
@@ -98,6 +99,11 @@ async def create_session(ctx: Context, app) -> "SessionEntry":
 
     async with _lock:
         if identity in _sessions:
+            # Race: caller already created app but slot is taken. Clean up.
+            try:
+                app.end_experiment(status=ExperimentStatus.FAILED)
+            except Exception:
+                pass
             raise ToolError(
                 "An experiment is already active for this identity. "
                 "Call end_experiment first before starting a new one."
@@ -109,7 +115,9 @@ async def create_session(ctx: Context, app) -> "SessionEntry":
 
 
 async def end_session(ctx: Context):
-    """End the current user's session and clean up.
+    """Remove the current user's session from the store.
+    
+    Does NOT finalize the experiment — the calling tool owns that responsibility.
     
     Args:
         ctx: FastMCP Context
@@ -119,12 +127,7 @@ async def end_session(ctx: Context):
         return
 
     async with _lock:
-        entry = _sessions.pop(identity, None)
-        if entry and entry.app:
-            try:
-                entry.app.end_experiment(status=ExperimentStatus.COMPLETED)
-            except Exception:
-                pass
+        _sessions.pop(identity, None)
 
 
 async def get_identity(ctx: Context) -> str:
