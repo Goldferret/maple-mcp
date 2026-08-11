@@ -1,11 +1,17 @@
 """Tests for MAPLE CLI."""
 
+import re
 import pytest
 from typer.testing import CliRunner
 
 from maple.cli import app
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 class TestHelp:
@@ -31,8 +37,9 @@ class TestHelp:
     def test_serve_all_help(self):
         result = runner.invoke(app, ["serve", "all", "--help"], color=False)
         assert result.exit_code == 0
-        assert "--dev" in result.output
-        assert "--config" in result.output
+        output = _strip_ansi(result.output)
+        assert "--dev" in output
+        assert "--config" in output
 
     def test_chat_help(self):
         result = runner.invoke(app, ["chat", "--help"], color=False)
