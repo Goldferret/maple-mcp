@@ -2,7 +2,7 @@
 
 **Model-Agnostic Platform for Laboratory Experiments**
 
-MAPLE adds LLM agent capabilities to any [MADSci](https://github.com/AD-SDL/MADSci)-powered laboratory via MCP. Two agents — an **Operator** for experiment execution and an **Overseer** for lab monitoring — connect to your lab through configurable MCP servers.
+MAPLE adds LLM agent capabilities to any [MADSci](https://github.com/AD-SDL/MADSci)-powered laboratory (v0.5.x) via MCP. Two agents — an **Operator** for experiment execution and an **Overseer** for lab monitoring — connect to your lab through configurable MCP servers.
 
 ## Architecture
 

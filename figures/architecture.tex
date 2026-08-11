@@ -1,4 +1,4 @@
-\documentclass[border=10pt]{standalone}
+\documentclass[border=8pt]{standalone}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta, positioning, fit, backgrounds, calc}
 
@@ -11,46 +11,43 @@
 \definecolor{toolborder}{RGB}{124,58,237}
 \definecolor{hwfill}{RGB}{255,237,213}
 \definecolor{hwborder}{RGB}{234,88,12}
-\definecolor{genfill}{RGB}{243,244,246}
-\definecolor{genborder}{RGB}{107,114,128}
 
 % Node styles
 \tikzset{
-  uibox/.style={draw=uiborder, fill=uifill, rounded corners=4pt, minimum height=1cm, minimum width=3cm, font=\small\sffamily, align=center, line width=0.8pt},
-  agentbox/.style={draw=agentborder, fill=agentfill, rounded corners=4pt, minimum height=1cm, minimum width=3cm, font=\small\sffamily, align=center, line width=0.8pt},
-  toolbox/.style={draw=toolborder, fill=toolfill, rounded corners=4pt, minimum height=1cm, minimum width=3cm, font=\small\sffamily, align=center, line width=0.8pt},
-  hwbox/.style={draw=hwborder, fill=hwfill, rounded corners=4pt, minimum height=1cm, minimum width=3cm, font=\small\sffamily, align=center, line width=0.8pt},
-  genbox/.style={draw=genborder, fill=genfill, rounded corners=4pt, minimum height=1cm, minimum width=3cm, font=\small\sffamily, align=center, line width=0.8pt},
-  layer/.style={draw=gray!40, fill=gray!3, rounded corners=6pt, dashed, line width=0.6pt},
-  layerlabel/.style={font=\footnotesize\sffamily\bfseries, text=gray!70},
-  arrow/.style={-{Stealth[length=5pt]}, line width=0.7pt, color=gray!70},
-  biarrow/.style={{Stealth[length=5pt]}-{Stealth[length=5pt]}, line width=0.7pt, color=gray!70},
-  arrowlabel/.style={font=\tiny\sffamily, text=gray!60, midway, fill=white, inner sep=1pt},
+  uibox/.style={draw=uiborder, fill=uifill, rounded corners=3pt, minimum height=0.8cm, minimum width=2.5cm, font=\small\sffamily, align=center, line width=0.8pt},
+  agentbox/.style={draw=agentborder, fill=agentfill, rounded corners=3pt, minimum height=0.8cm, minimum width=2.5cm, font=\small\sffamily, align=center, line width=0.8pt},
+  toolbox/.style={draw=toolborder, fill=toolfill, rounded corners=3pt, minimum height=0.8cm, minimum width=2.5cm, font=\small\sffamily, align=center, line width=0.8pt},
+  hwbox/.style={draw=hwborder, fill=hwfill, rounded corners=3pt, minimum height=0.8cm, minimum width=2.5cm, font=\small\sffamily, align=center, line width=0.8pt},
+  layer/.style={draw=gray!40, fill=gray!3, rounded corners=5pt, dashed, line width=0.5pt},
+  layerlabel/.style={font=\footnotesize\sffamily\bfseries, text=gray!60},
+  arrow/.style={-{Stealth[length=4pt]}, line width=0.6pt, color=gray!60},
+  biarrow/.style={{Stealth[length=4pt]}-{Stealth[length=4pt]}, line width=0.6pt, color=gray!60},
+  arrowlabel/.style={font=\tiny\sffamily, text=gray!50, midway, fill=white, inner sep=1pt},
 }
 
 \begin{document}
 \begin{tikzpicture}
 
-  % --- Layer 1: TUI ---
-  \node[uibox] (tui) {maple chat\\{\tiny TUI (Textual)}};
+  % --- CLI ---
+  \node[uibox] (tui) {maple chat};
 
-  % --- Layer 2: Agents ---
-  \node[agentbox, below left=2cm and 0.5cm of tui] (op-agent) {Operator Agent\\{\tiny Strands SDK}};
-  \node[agentbox, below right=2cm and 0.5cm of tui] (ov-agent) {Overseer Agent\\{\tiny Strands SDK}};
+  % --- Agents ---
+  \node[agentbox, below left=1.4cm and 0.3cm of tui] (op-agent) {Operator Agent};
+  \node[agentbox, below right=1.4cm and 0.3cm of tui] (ov-agent) {Overseer Agent};
 
-  % --- Layer 3: MCP Servers ---
-  \node[toolbox, below=2cm of op-agent] (op-mcp) {Operator MCP\\{\tiny 7 tools}};
-  \node[toolbox, below=2cm of ov-agent] (ov-mcp) {Overseer MCP\\{\tiny 12 tools}};
+  % --- MCP Servers ---
+  \node[toolbox, below=1.4cm of op-agent] (op-mcp) {Operator MCP};
+  \node[toolbox, below=1.4cm of ov-agent] (ov-mcp) {Overseer MCP};
 
-  % --- Layer 4: MADSci ---
-  \node[hwbox, below=2cm of $(op-mcp)!0.5!(ov-mcp)$] (madsci) {MADSci Services\\{\tiny Workcell, Experiment, Event, Data, Resource, Location}};
+  % --- MADSci ---
+  \node[hwbox, below=1.4cm of $(op-mcp)!0.5!(ov-mcp)$] (madsci) {MADSci Services};
 
   % --- Layer boundaries ---
   \begin{pgfonlayer}{background}
-    \node[layer, fit=(tui), inner sep=10pt, label={[layerlabel]left:CLI}] {};
-    \node[layer, fit=(op-agent)(ov-agent), inner sep=10pt, label={[layerlabel]left:Agents}] {};
-    \node[layer, fit=(op-mcp)(ov-mcp), inner sep=10pt, label={[layerlabel]left:MCP}] {};
-    \node[layer, fit=(madsci), inner sep=10pt, label={[layerlabel]left:Lab}] {};
+    \node[layer, fit=(tui), inner sep=8pt, label={[layerlabel]left:CLI}] {};
+    \node[layer, fit=(op-agent)(ov-agent), inner sep=8pt, label={[layerlabel]left:Agents}] {};
+    \node[layer, fit=(op-mcp)(ov-mcp), inner sep=8pt, label={[layerlabel]left:MCP}] {};
+    \node[layer, fit=(madsci), inner sep=8pt, label={[layerlabel]left:Lab}] {};
   \end{pgfonlayer}
 
   % --- Arrows ---
