@@ -47,15 +47,7 @@ jobs:
 
       - name: Create .env for integration tests
         run: |
-          cat > examples/block_sorting/.env << EOF
-          WORKCELL_SERVER_URL=http://localhost:8005/
-          EXPERIMENT_SERVER_URL=http://localhost:8002/
-          EVENT_SERVER_URL=http://localhost:8001/
-          DATA_SERVER_URL=http://localhost:8004/
-          RESOURCE_SERVER_URL=http://localhost:8003/
-          LOCATION_SERVER_URL=http://localhost:8006/
-          MCP_OPERATOR_URL=http://localhost:8102/mcp
-          EOF
+          printf 'WORKCELL_SERVER_URL=http://localhost:8005/\nEXPERIMENT_SERVER_URL=http://localhost:8002/\nEVENT_SERVER_URL=http://localhost:8001/\nDATA_SERVER_URL=http://localhost:8004/\nRESOURCE_SERVER_URL=http://localhost:8003/\nLOCATION_SERVER_URL=http://localhost:8006/\nMCP_OPERATOR_URL=http://localhost:8102/mcp\n' > examples/block_sorting/.env
           cp examples/block_sorting/.env .env
 
       - name: Run integration tests
