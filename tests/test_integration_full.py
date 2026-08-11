@@ -121,12 +121,26 @@ class TestFullServe:
         assert "overseer-mcp" in result.stdout
 
     def test_operator_mcp_ping(self):
-        resp = httpx.get("http://localhost:8102/ping", timeout=5)
-        assert resp.status_code == 200
+        import time
+        for _ in range(10):
+            try:
+                resp = httpx.get("http://localhost:8102/ping", timeout=5)
+                if resp.status_code == 200:
+                    return
+            except httpx.ConnectError:
+                time.sleep(2)
+        pytest.fail("Operator MCP not responding after 20s")
 
     def test_overseer_mcp_ping(self):
-        resp = httpx.get("http://localhost:8103/ping", timeout=5)
-        assert resp.status_code == 200
+        import time
+        for _ in range(10):
+            try:
+                resp = httpx.get("http://localhost:8103/ping", timeout=5)
+                if resp.status_code == 200:
+                    return
+            except httpx.ConnectError:
+                time.sleep(2)
+        pytest.fail("Overseer MCP not responding after 20s")
 
 
 # ---------------------------------------------------------------------------

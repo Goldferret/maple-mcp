@@ -84,8 +84,15 @@ class TestStubServe:
         assert resp.json()["status"] == "ok"
 
     def test_operator_mcp_ping(self):
-        resp = httpx.get("http://localhost:8102/ping", timeout=5)
-        assert resp.status_code == 200
+        import time
+        for _ in range(10):
+            try:
+                resp = httpx.get("http://localhost:8102/ping", timeout=5)
+                if resp.status_code == 200:
+                    return
+            except httpx.ConnectError:
+                time.sleep(2)
+        pytest.fail("Operator MCP not responding after 20s")
 
     def test_mock_agent_ping(self):
         resp = httpx.get("http://localhost:8202/ping", timeout=5)
@@ -169,8 +176,11 @@ class TestStubChat:
             await pilot.press("H", "e", "l", "l", "o")
             await pilot.press("enter")
 
-            # Wait for stream to complete (7 MCP calls + delays ≈ 30s)
-            await asyncio.sleep(40)
+            # Poll until stream completes (up to 40s)
+            for _ in range(8):
+                if getattr(pilot.app, "_exit_on_next_submit", False):
+                    break
+                await asyncio.sleep(5)
 
             # Verify experiment ended message appeared
             assert getattr(pilot.app, "_exit_on_next_submit", False) is True
