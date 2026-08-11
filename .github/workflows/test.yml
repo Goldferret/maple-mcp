@@ -48,7 +48,7 @@ jobs:
       - name: Start MAPLE demo stack
         run: |
           cd examples/block_sorting
-          maple serve --stub
+          maple serve stub
           sleep 5
           maple status
         env:
