@@ -45,16 +45,21 @@ jobs:
           curl -sf http://localhost:8005/health || (echo "Workcell Manager not ready" && exit 1)
           echo "✓ MADSci services ready"
 
+      - name: Create .env for integration tests
+        run: |
+          cat > examples/block_sorting/.env << EOF
+          WORKCELL_SERVER_URL=http://localhost:8005/
+          EXPERIMENT_SERVER_URL=http://localhost:8002/
+          EVENT_SERVER_URL=http://localhost:8001/
+          DATA_SERVER_URL=http://localhost:8004/
+          RESOURCE_SERVER_URL=http://localhost:8003/
+          LOCATION_SERVER_URL=http://localhost:8006/
+          MCP_OPERATOR_URL=http://localhost:8102/mcp
+          EOF
+          cp examples/block_sorting/.env .env
+
       - name: Run integration tests
         run: pytest -m integration --tb=short
-        env:
-          WORKCELL_SERVER_URL: http://localhost:8005/
-          EXPERIMENT_SERVER_URL: http://localhost:8002/
-          EVENT_SERVER_URL: http://localhost:8001/
-          DATA_SERVER_URL: http://localhost:8004/
-          RESOURCE_SERVER_URL: http://localhost:8003/
-          LOCATION_SERVER_URL: http://localhost:8006/
-          MCP_OPERATOR_URL: http://localhost:8102/mcp
 
       - name: Tear down
         if: always()
