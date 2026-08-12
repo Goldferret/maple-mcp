@@ -55,9 +55,9 @@ dev = [
 maple = "maple.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/gabrielferrer/maple-mcp"
-Repository = "https://github.com/gabrielferrer/maple-mcp"
-Issues = "https://github.com/gabrielferrer/maple-mcp/issues"
+Homepage = "https://github.com/Goldferret/maple-mcp"
+Repository = "https://github.com/Goldferret/maple-mcp"
+Issues = "https://github.com/Goldferret/maple-mcp/issues"
 
 [tool.ruff]
 line-length = 120
