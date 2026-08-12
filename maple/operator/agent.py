@@ -225,7 +225,7 @@ async def stream(request: dict):
                 # Log tool call once (first time we see this toolUseId)
                 tool_id = ctu.get("toolUseId", "")
                 if tool_id and tool_id != _last_logged_tool:
-                    print(f"INFO:     Tool call: {ctu.get("name", "?")}", flush=True)
+                    tool_name = ctu.get("name", "?"); print(f"INFO:     Tool call: {tool_name}", flush=True)
                     _last_logged_tool = tool_id
                 out["current_tool_use"] = {
                     "toolUseId": tool_id,
