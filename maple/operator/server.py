@@ -5,7 +5,7 @@ detection, and verification. Uses MADSci ExperimentApplication natively.
 """
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 import atexit
 import json

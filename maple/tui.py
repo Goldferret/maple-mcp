@@ -35,7 +35,7 @@ class MessageBubble(Markdown):
 
     DEFAULT_CSS = """
     MessageBubble {
-        margin-bottom: 1;
+        margin: 0;
         padding: 0 1;
     }
     """
@@ -70,7 +70,7 @@ class MapleChatApp(App):
     CSS = """
     #status { height: 1; dock: top; background: $panel; }
     #log { height: 1fr; padding: 0 1; }
-    #prompt { dock: bottom; }
+    #prompt { dock: bottom; margin-bottom: 1; }
     """
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
@@ -104,7 +104,51 @@ class MapleChatApp(App):
         except httpx.HTTPError:
             status.connected = False
 
+        # Load previous conversation if resuming
+        self._load_session_history()
+
         self.query_one(Input).focus()
+
+    def _load_session_history(self):
+        """Load and display previous messages from session files."""
+        from pathlib import Path
+        import json as _json
+
+        session_dir = (
+            Path.home() / ".maple" / "sessions" / self._agent
+            / f"session_{self._session_id}" / "agents" / "agent_default" / "messages"
+        )
+        if not session_dir.exists():
+            return
+
+        log = self.query_one("#log", VerticalScroll)
+        msg_files = sorted(session_dir.glob("message_*.json"), key=lambda f: int(f.stem.split("_")[1]))
+
+        for msg_file in msg_files:
+            try:
+                data = _json.loads(msg_file.read_text())
+                role = data["message"]["role"]
+                content = data["message"].get("content", [])
+
+                if role == "user":
+                    text = next((c.get("text", "") for c in content if "text" in c), "")
+                    if text:
+                        bubble = MessageBubble(f"**You >** {text}")
+                        log.mount(bubble)
+                elif role == "assistant":
+                    # Collect text parts and tool calls
+                    texts = [c["text"] for c in content if "text" in c]
+                    tools = [c["toolUse"]["name"] for c in content if "toolUse" in c]
+                    for tool in tools:
+                        indicator = ToolCallIndicator(f"⚡ {tool}")
+                        log.mount(indicator)
+                    if texts:
+                        bubble = MessageBubble("\n".join(texts))
+                        log.mount(bubble)
+            except Exception:
+                continue
+
+        log.scroll_end(animate=False)
 
     async def on_unmount(self) -> None:
         if self._client:
@@ -127,7 +171,7 @@ class MapleChatApp(App):
 
         # Show user message
         log = self.query_one("#log", VerticalScroll)
-        user_bubble = MessageBubble(f"**you >** {text}")
+        user_bubble = MessageBubble(f"**You >** {text}")
         log.mount(user_bubble)
         log.scroll_end(animate=False)
 
@@ -148,6 +192,7 @@ class MapleChatApp(App):
         last_flush = time.monotonic()
         FLUSH_INTERVAL = 0.05
         experiment_ended = False
+        _pending_tool = None
 
         try:
             async with self._client.stream(
@@ -165,6 +210,21 @@ class MapleChatApp(App):
                         continue
 
                     if "data" in event:
+                        # Render pending tool call if LLM is now reasoning again
+                        if _pending_tool:
+                            if buffer:
+                                bubble.update(buffer)
+                                buffer = ""
+                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
+                            indicator = ToolCallIndicator(
+                                f"⚡ {_pending_tool['name']} {tool_input}"
+                            )
+                            await log.mount(indicator)
+                            log.scroll_end(animate=False)
+                            bubble = MessageBubble("")
+                            await log.mount(bubble)
+                            _pending_tool = None
+
                         buffer += event["data"]
                         now = time.monotonic()
                         if now - last_flush >= FLUSH_INTERVAL:
@@ -173,23 +233,43 @@ class MapleChatApp(App):
                             last_flush = now
 
                     elif "current_tool_use" in event:
-                        # Flush pending text
-                        if buffer:
-                            bubble.update(buffer)
-                            buffer = ""
-                        # Show tool call
-                        tool = event["current_tool_use"]
-                        tool_input = json.dumps(tool.get("input", {}), indent=None)
-                        indicator = ToolCallIndicator(
-                            f"⚡ {tool['name']} {tool_input}"
-                        )
-                        await log.mount(indicator)
-                        log.scroll_end(animate=False)
-                        # Start a new bubble for the next reasoning chunk
-                        bubble = MessageBubble("")
-                        await log.mount(bubble)
+                        new_tool = event["current_tool_use"]
+                        new_id = new_tool.get("toolUseId", "")
+                        pending_id = _pending_tool.get("toolUseId", "") if _pending_tool else ""
+
+                        if _pending_tool and new_id != pending_id:
+                            # Different tool — render the previous one first
+                            if buffer:
+                                bubble.update(buffer)
+                                buffer = ""
+                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
+                            indicator = ToolCallIndicator(
+                                f"⚡ {_pending_tool['name']} {tool_input}"
+                            )
+                            await log.mount(indicator)
+                            log.scroll_end(animate=False)
+                            bubble = MessageBubble("")
+                            await log.mount(bubble)
+
+                        # Track (or update) the current tool call
+                        _pending_tool = new_tool
 
                     elif "result" in event:
+                        # Render any pending tool call before showing result
+                        if _pending_tool:
+                            if buffer:
+                                bubble.update(buffer)
+                                buffer = ""
+                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
+                            indicator = ToolCallIndicator(
+                                f"⚡ {_pending_tool['name']} {tool_input}"
+                            )
+                            await log.mount(indicator)
+                            log.scroll_end(animate=False)
+                            bubble = MessageBubble("")
+                            await log.mount(bubble)
+                            _pending_tool = None
+
                         # Final flush
                         if buffer:
                             bubble.update(buffer)

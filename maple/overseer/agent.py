@@ -1,8 +1,13 @@
 """MAPLE Overseer Agent — Lab monitoring and management agent service."""
 
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(os.getcwd()) / ".env", override=True)
+
 import asyncio
 import json
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from strands import Agent
 from strands.session import FileSessionManager
+from strands.tools.executors import SequentialToolExecutor
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamable_http_client
 
@@ -84,9 +90,11 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
 
     model = _create_model()
     token = get_or_create_token()
+    import httpx
+    auth_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {token}"})
     mcp_client = MCPClient(lambda: streamable_http_client(
         MCP_OVERSEER_URL,
-        headers={"Authorization": f"Bearer {token}"},
+        http_client=auth_client,
     ))
 
     hooks = extra_hooks or []
@@ -96,6 +104,8 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
         system_prompt=SYSTEM_PROMPT,
         tools=[mcp_client],
         hooks=hooks if hooks else None,
+        tool_executor=SequentialToolExecutor(),
+        callback_handler=None,
         session_manager=FileSessionManager(
             session_id=session_id,
             storage_dir=str(OVERSEER_SESSIONS_DIR),
@@ -133,6 +143,7 @@ async def stream(request: dict):
 
     async def event_generator():
         agent = create_overseer_agent(session_id)
+        _last_logged_tool = None
 
         async for event in agent.stream_async(message):
             out = {}
@@ -145,8 +156,12 @@ async def stream(request: dict):
                         tool_input = json.loads(tool_input)
                     except (json.JSONDecodeError, TypeError):
                         pass
+                tool_id = ctu.get("toolUseId", "")
+                if tool_id and tool_id != _last_logged_tool:
+                    print(f"INFO:     Tool call: {ctu.get("name", "?")}", flush=True)
+                    _last_logged_tool = tool_id
                 out["current_tool_use"] = {
-                    "toolUseId": ctu.get("toolUseId", ""),
+                    "toolUseId": tool_id,
                     "name": ctu.get("name", ""),
                     "input": tool_input,
                 }

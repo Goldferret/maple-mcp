@@ -68,7 +68,7 @@ def serve_mock(
 def _do_serve(agent: str = None, stub: bool = False, dev: bool = False, config: str = "maple.config.yaml"):
     """Shared serve logic."""
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=True)
 
     from maple.services import start_services
 
@@ -100,7 +100,7 @@ def chat_operator(
 ):
     """Chat with the Operator agent."""
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=True)
     from maple.tui import run_chat
     session_id = _get_session_id("operator", resume)
     run_chat(agent="operator", host=host, session_id=session_id)
@@ -113,7 +113,7 @@ def chat_overseer(
 ):
     """Chat with the Overseer agent."""
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=True)
     from maple.tui import run_chat
     session_id = _get_session_id("overseer", resume)
     run_chat(agent="overseer", host=host, session_id=session_id)
@@ -131,10 +131,11 @@ def _get_session_id(agent: str, resume: bool) -> str:
     sessions_dir = Path.home() / ".maple" / "sessions" / agent
 
     if resume and sessions_dir.exists():
-        json_files = list(sessions_dir.glob("*.json"))
-        if json_files:
-            latest = max(json_files, key=lambda f: f.stat().st_mtime)
-            session_id = latest.stem
+        session_dirs = [d for d in sessions_dir.iterdir() if d.is_dir() and d.name.startswith("session_")]
+        if session_dirs:
+            latest = max(session_dirs, key=lambda d: d.stat().st_mtime)
+            # Extract UUID from "session_{uuid}" directory name
+            session_id = latest.name.removeprefix("session_")
             console.print(f"[dim]Resuming session: {session_id[:8]}...[/dim]")
             return session_id
         else:

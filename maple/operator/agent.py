@@ -1,9 +1,15 @@
 """MAPLE Operator Agent — Experiment execution agent service."""
 
-import asyncio
-import json
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Explicit path required — dotenv's default search uses caller's __file__ location,
+# not CWD, which fails when imported via uvicorn
+load_dotenv(Path(os.getcwd()) / ".env", override=True)
+
+import asyncio
+import json
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,12 +138,14 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         extra_hooks: Additional Strands HookProvider instances to attach.
     """
     from maple.auth import get_or_create_token
+    import httpx
 
     model = _create_model()
     token = get_or_create_token()
+    auth_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {token}"})
     mcp_client = MCPClient(lambda: streamable_http_client(
         MCP_OPERATOR_URL,
-        headers={"Authorization": f"Bearer {token}"},
+        http_client=auth_client,
     ))
     reasoning_hook = ReasoningCaptureHook(mcp_base_url=MCP_OPERATOR_URL)
 
@@ -159,6 +167,7 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         tools=[mcp_client],
         hooks=hooks,
         tool_executor=SequentialToolExecutor(),
+        callback_handler=None,  # Suppress stdout printing (TUI handles display)
         session_manager=FileSessionManager(
             session_id=session_id,
             storage_dir=str(OPERATOR_SESSIONS_DIR),
@@ -200,6 +209,7 @@ async def stream(request: dict):
         agent = create_operator_agent(session_id)
         reasoning_hook = getattr(agent, "_reasoning_hook", None)
         experiment_ended = False
+        _last_logged_tool = None
 
         async for event in agent.stream_async(message):
             out = {}
@@ -212,8 +222,13 @@ async def stream(request: dict):
                         tool_input = json.loads(tool_input)
                     except (json.JSONDecodeError, TypeError):
                         pass
+                # Log tool call once (first time we see this toolUseId)
+                tool_id = ctu.get("toolUseId", "")
+                if tool_id and tool_id != _last_logged_tool:
+                    print(f"INFO:     Tool call: {ctu.get("name", "?")}", flush=True)
+                    _last_logged_tool = tool_id
                 out["current_tool_use"] = {
-                    "toolUseId": ctu.get("toolUseId", ""),
+                    "toolUseId": tool_id,
                     "name": ctu.get("name", ""),
                     "input": tool_input,
                 }

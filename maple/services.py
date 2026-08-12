@@ -123,9 +123,18 @@ def start_services(agent: str = None, config: str = "maple.config.yaml", stub: b
             # Stale PID file
             pid_file.unlink()
 
-        # Open log file
+        # Open log file (clear previous contents for fresh start)
         log_file = LOG_DIR / f"{name}.log"
-        log_handle = open(log_file, "a")
+        log_handle = open(log_file, "w")
+
+        # Build env: merge .env file values on top of current env
+        child_env = os.environ.copy()
+        env_file = Path(os.getcwd()) / ".env"
+        if env_file.exists():
+            from dotenv import dotenv_values
+            child_env.update({k: v for k, v in dotenv_values(env_file).items() if v is not None})
+        # Force unbuffered output so log files update in real-time
+        child_env["PYTHONUNBUFFERED"] = "1"
 
         # Start detached process
         proc = subprocess.Popen(
@@ -134,7 +143,7 @@ def start_services(agent: str = None, config: str = "maple.config.yaml", stub: b
             stderr=subprocess.STDOUT,
             start_new_session=True,
             cwd=os.getcwd(),
-            env=os.environ.copy(),
+            env=child_env,
         )
 
         # Store PID

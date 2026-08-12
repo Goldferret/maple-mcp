@@ -65,30 +65,34 @@ class MapleAttachApp(App):
                 yield ServiceLogPane(name, id=f"pane-{name}")
 
     async def on_mount(self) -> None:
+        self._offsets: dict[str, int] = {}
         for name in self._services:
-            self.run_worker(self._tail_file(name), exclusive=False)
+            path = LOG_DIR / f"{name}.log"
+            path.touch(exist_ok=True)
+            self._offsets[name] = path.stat().st_size
+            self._show_tail(path, self.query_one(f"#log-{name}", RichLog), lines=20)
+        # Single watcher on the logs directory
+        self.run_worker(self._watch_logs(), exclusive=True)
 
-    async def _tail_file(self, name: str) -> None:
-        """Watch a log file and stream new lines to the pane."""
-        from watchfiles import awatch
-
-        path = LOG_DIR / f"{name}.log"
-        path.touch(exist_ok=True)
-
-        log = self.query_one(f"#log-{name}", RichLog)
-        status = self.query_one(f"#status-{name}", Static)
-
-        # Start at end of file (tail -f behavior)
-        offset = path.stat().st_size
-
-        # Show last 20 lines for context
-        self._show_tail(path, log, lines=20)
+    async def _watch_logs(self) -> None:
+        """Poll log files for changes every 500ms. Simple and reliable."""
+        import asyncio
 
         try:
-            async for _changes in awatch(path):
-                offset = self._flush_new_lines(path, log, offset)
+            while True:
+                await asyncio.sleep(0.5)
+                for name in self._services:
+                    path = LOG_DIR / f"{name}.log"
+                    if not path.exists():
+                        continue
+                    current_size = path.stat().st_size
+                    if current_size != self._offsets.get(name, 0):
+                        log = self.query_one(f"#log-{name}", RichLog)
+                        self._offsets[name] = self._flush_new_lines(
+                            path, log, self._offsets[name]
+                        )
         except Exception:
-            status.update(f"[red]● {name} — log watch stopped[/]")
+            pass
 
     def _show_tail(self, path: Path, log: RichLog, lines: int = 20):
         """Show the last N lines of the file on attach."""
