@@ -13,9 +13,17 @@ MAPLE adds LLM agent capabilities to any [MADSci](https://github.com/AD-SDL/MADS
 ```bash
 pip install maple-mcp
 cd your-experiment/
-maple serve stub        # Start demo (no LLM needed)
-maple chat operator     # Open TUI — type anything
-maple down              # Stop all services
+cp .env.example .env          # Configure MADSci URLs + model provider
+maple serve stub              # Start demo (no LLM needed)
+maple chat operator           # Open TUI — type anything
+maple down                    # Stop all services
+```
+
+For a real LLM experiment:
+```bash
+maple serve operator          # Start with your configured model
+maple chat operator           # Run an experiment
+maple chat operator --resume  # Pick up where you left off
 ```
 
 See [`examples/block_sorting/`](examples/block_sorting/) for a complete walkthrough.
