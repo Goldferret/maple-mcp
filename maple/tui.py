@@ -192,7 +192,6 @@ class MapleChatApp(App):
         last_flush = time.monotonic()
         FLUSH_INTERVAL = 0.05
         experiment_ended = False
-        _pending_tool = None
 
         try:
             async with self._client.stream(
@@ -210,21 +209,6 @@ class MapleChatApp(App):
                         continue
 
                     if "data" in event:
-                        # Render pending tool call if LLM is now reasoning again
-                        if _pending_tool:
-                            if buffer:
-                                bubble.update(buffer)
-                                buffer = ""
-                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
-                            indicator = ToolCallIndicator(
-                                f"⚡ {_pending_tool['name']} {tool_input}"
-                            )
-                            await log.mount(indicator)
-                            log.scroll_end(animate=False)
-                            bubble = MessageBubble("")
-                            await log.mount(bubble)
-                            _pending_tool = None
-
                         buffer += event["data"]
                         now = time.monotonic()
                         if now - last_flush >= FLUSH_INTERVAL:
@@ -233,43 +217,21 @@ class MapleChatApp(App):
                             last_flush = now
 
                     elif "current_tool_use" in event:
-                        new_tool = event["current_tool_use"]
-                        new_id = new_tool.get("toolUseId", "")
-                        pending_id = _pending_tool.get("toolUseId", "") if _pending_tool else ""
-
-                        if _pending_tool and new_id != pending_id:
-                            # Different tool — render the previous one first
-                            if buffer:
-                                bubble.update(buffer)
-                                buffer = ""
-                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
-                            indicator = ToolCallIndicator(
-                                f"⚡ {_pending_tool['name']} {tool_input}"
-                            )
-                            await log.mount(indicator)
-                            log.scroll_end(animate=False)
-                            bubble = MessageBubble("")
-                            await log.mount(bubble)
-
-                        # Track (or update) the current tool call
-                        _pending_tool = new_tool
+                        # Tool calls arrive complete (via hook, not streaming delta)
+                        if buffer:
+                            bubble.update(buffer)
+                            buffer = ""
+                        tool = event["current_tool_use"]
+                        tool_input = json.dumps(tool.get("input", {}), indent=None)
+                        indicator = ToolCallIndicator(
+                            f"⚡ {tool['name']} {tool_input}"
+                        )
+                        await log.mount(indicator)
+                        log.scroll_end(animate=False)
+                        bubble = MessageBubble("")
+                        await log.mount(bubble)
 
                     elif "result" in event:
-                        # Render any pending tool call before showing result
-                        if _pending_tool:
-                            if buffer:
-                                bubble.update(buffer)
-                                buffer = ""
-                            tool_input = json.dumps(_pending_tool.get("input", {}), indent=None)
-                            indicator = ToolCallIndicator(
-                                f"⚡ {_pending_tool['name']} {tool_input}"
-                            )
-                            await log.mount(indicator)
-                            log.scroll_end(animate=False)
-                            bubble = MessageBubble("")
-                            await log.mount(bubble)
-                            _pending_tool = None
-
                         # Final flush
                         if buffer:
                             bubble.update(buffer)

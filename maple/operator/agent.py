@@ -161,19 +161,41 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
     if extra_hooks:
         hooks.extend(extra_hooks)
 
+    # Hook to capture complete tool calls (avoids streaming deltas)
+    from strands.hooks import HookProvider, HookRegistry
+    from strands.hooks.events import BeforeToolCallEvent
+
+    tool_queue = []
+
+    class ToolCallCapture(HookProvider):
+        def register_hooks(self, registry: HookRegistry, **kwargs):
+            registry.add_callback(BeforeToolCallEvent, self._on_tool)
+
+        def _on_tool(self, event: BeforeToolCallEvent):
+            tool_queue.append({
+                "name": event.tool_use.get("name", ""),
+                "input": event.tool_use.get("input", {}),
+            })
+            name = event.tool_use.get("name", "?")
+            print(f"INFO:     Tool call: {name}", flush=True)
+
+    hooks.append(ToolCallCapture())
+
     agent = Agent(
         model=model,
         system_prompt=system_prompt,
         tools=[mcp_client],
         hooks=hooks,
         tool_executor=SequentialToolExecutor(),
-        callback_handler=None,  # Suppress stdout printing (TUI handles display)
+        callback_handler=None,
+        conversation_manager=None,
         session_manager=FileSessionManager(
             session_id=session_id,
             storage_dir=str(OPERATOR_SESSIONS_DIR),
         ),
     )
     agent._reasoning_hook = reasoning_hook
+    agent._tool_call_queue = tool_queue
     return agent
 
 
@@ -208,32 +230,29 @@ async def stream(request: dict):
     async def event_generator():
         agent = create_operator_agent(session_id)
         reasoning_hook = getattr(agent, "_reasoning_hook", None)
+        tool_queue = getattr(agent, "_tool_call_queue", [])
         experiment_ended = False
-        _last_logged_tool = None
 
         async for event in agent.stream_async(message):
             out = {}
 
-            if "current_tool_use" in event:
-                ctu = event["current_tool_use"]
-                tool_input = ctu.get("input", {})
-                if isinstance(tool_input, str):
-                    try:
-                        tool_input = json.loads(tool_input)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                # Log tool call once (first time we see this toolUseId)
-                tool_id = ctu.get("toolUseId", "")
-                if tool_id and tool_id != _last_logged_tool:
-                    tool_name = ctu.get("name", "?"); print(f"INFO:     Tool call: {tool_name}", flush=True)
-                    _last_logged_tool = tool_id
-                out["current_tool_use"] = {
-                    "toolUseId": tool_id,
-                    "name": ctu.get("name", ""),
-                    "input": tool_input,
+            # Emit any queued complete tool calls (from BeforeToolCallEvent hook)
+            while tool_queue:
+                tool = tool_queue.pop(0)
+                tool_event = {
+                    "current_tool_use": {
+                        "toolUseId": f"tool-{tool['name']}",
+                        "name": tool["name"],
+                        "input": tool["input"],
+                    }
                 }
-                if ctu.get("name") == "end_experiment":
+                yield f"data: {json.dumps(tool_event, default=str)}\n\n"
+                if tool["name"] == "end_experiment":
                     experiment_ended = True
+
+            # Skip raw streaming tool deltas — hook handles complete calls
+            if "current_tool_use" in event:
+                continue
 
             if "data" in event:
                 out["data"] = event["data"]

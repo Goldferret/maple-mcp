@@ -97,13 +97,32 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
         http_client=auth_client,
     ))
 
+    # Hook to capture complete tool calls
+    from strands.hooks import HookProvider, HookRegistry
+    from strands.hooks.events import BeforeToolCallEvent
+
+    tool_queue = []
+
+    class ToolCallCapture(HookProvider):
+        def register_hooks(self, registry: HookRegistry, **kwargs):
+            registry.add_callback(BeforeToolCallEvent, self._on_tool)
+
+        def _on_tool(self, event: BeforeToolCallEvent):
+            tool_queue.append({
+                "name": event.tool_use.get("name", ""),
+                "input": event.tool_use.get("input", {}),
+            })
+            name = event.tool_use.get("name", "?")
+            print(f"INFO:     Tool call: {name}", flush=True)
+
     hooks = extra_hooks or []
+    hooks.append(ToolCallCapture())
 
     agent = Agent(
         model=model,
         system_prompt=SYSTEM_PROMPT,
         tools=[mcp_client],
-        hooks=hooks if hooks else None,
+        hooks=hooks,
         tool_executor=SequentialToolExecutor(),
         callback_handler=None,
         session_manager=FileSessionManager(
@@ -111,6 +130,7 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
             storage_dir=str(OVERSEER_SESSIONS_DIR),
         ),
     )
+    agent._tool_call_queue = tool_queue
     return agent
 
 
@@ -143,28 +163,26 @@ async def stream(request: dict):
 
     async def event_generator():
         agent = create_overseer_agent(session_id)
-        _last_logged_tool = None
+        tool_queue = getattr(agent, "_tool_call_queue", [])
 
         async for event in agent.stream_async(message):
             out = {}
 
-            if "current_tool_use" in event:
-                ctu = event["current_tool_use"]
-                tool_input = ctu.get("input", {})
-                if isinstance(tool_input, str):
-                    try:
-                        tool_input = json.loads(tool_input)
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                tool_id = ctu.get("toolUseId", "")
-                if tool_id and tool_id != _last_logged_tool:
-                    tool_name = ctu.get("name", "?"); print(f"INFO:     Tool call: {tool_name}", flush=True)
-                    _last_logged_tool = tool_id
-                out["current_tool_use"] = {
-                    "toolUseId": tool_id,
-                    "name": ctu.get("name", ""),
-                    "input": tool_input,
+            # Emit any queued complete tool calls
+            while tool_queue:
+                tool = tool_queue.pop(0)
+                tool_event = {
+                    "current_tool_use": {
+                        "toolUseId": f"tool-{tool['name']}",
+                        "name": tool["name"],
+                        "input": tool["input"],
+                    }
                 }
+                yield f"data: {json.dumps(tool_event, default=str)}\n\n"
+
+            # Skip raw streaming tool deltas
+            if "current_tool_use" in event:
+                continue
 
             if "data" in event:
                 out["data"] = event["data"]
