@@ -109,68 +109,70 @@ async def stream(request: dict):
     """
 
     async def event_generator():
-        from mcp import ClientSession
-        from mcp.client.streamable_http import streamable_http_client
+        """Stream scripted agent events. Tries real MCP calls if server available, falls back to canned."""
+        import httpx
 
-        captured = {}  # Store captured values from tool results
+        # Check if MCP server is available
+        mcp_available = False
+        try:
+            async with httpx.AsyncClient(timeout=3) as client:
+                resp = await client.get(MCP_OPERATOR_URL.replace("/mcp", "/ping"))
+                mcp_available = resp.status_code == 200
+        except Exception:
+            pass
 
-        async with streamable_http_client(MCP_OPERATOR_URL) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        captured = {}
 
-                for step in SCRIPT:
-                    # Emit reasoning text token by token
-                    reasoning = step["reasoning"]
-                    for word in reasoning.split(" "):
-                        event = {"data": word + " "}
-                        yield f"data: {json.dumps(event)}\n\n"
-                        await asyncio.sleep(0.05)
+        if mcp_available:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamable_http_client
 
-                    await asyncio.sleep(0.3)
+            async with streamable_http_client(MCP_OPERATOR_URL) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
 
-                    # Resolve any placeholders in input
-                    tool_input = json.loads(
-                        json.dumps(step["input"]).replace("{experiment_id}", captured.get("experiment_id", ""))
-                    )
+                    for step in SCRIPT:
+                        reasoning = step["reasoning"]
+                        for word in reasoning.split(" "):
+                            yield f"data: {json.dumps({'data': word + ' '})}\n\n"
+                            await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.3)
 
-                    # Emit tool call event
-                    tool_event = {
-                        "current_tool_use": {
-                            "toolUseId": f"tool-{step['tool']}",
-                            "name": step["tool"],
-                            "input": tool_input,
-                        }
-                    }
-                    yield f"data: {json.dumps(tool_event)}\n\n"
+                        tool_input = json.loads(
+                            json.dumps(step["input"]).replace("{experiment_id}", captured.get("experiment_id", ""))
+                        )
+                        tool_event = {"current_tool_use": {"toolUseId": f"tool-{step['tool']}", "name": step["tool"], "input": tool_input}}
+                        yield f"data: {json.dumps(tool_event)}\n\n"
 
-                    # Actually call the MCP tool
-                    try:
-                        result = await session.call_tool(step["tool"], tool_input)
-                        # Capture fields from result if specified
-                        if "capture" in step:
-                            for content in result.content:
-                                if hasattr(content, "text"):
-                                    try:
-                                        result_data = json.loads(content.text)
-                                        if step["capture"] in result_data:
-                                            captured[step["capture"]] = result_data[step["capture"]]
-                                    except (json.JSONDecodeError, TypeError):
-                                        pass
-                    except Exception as exc:
-                        error_event = {"data": f" [ERROR: MCP call failed: {exc}] "}
-                        yield f"data: {json.dumps(error_event)}\n\n"
-                        result_event = {
-                            "result": {
-                                "stop_reason": "error",
-                                "experiment_ended": False,
-                            }
-                        }
-                        yield f"data: {json.dumps(result_event)}\n\n"
-                        return
+                        try:
+                            result = await session.call_tool(step["tool"], tool_input)
+                            if "capture" in step:
+                                for content in result.content:
+                                    if hasattr(content, "text"):
+                                        try:
+                                            result_data = json.loads(content.text)
+                                            if step["capture"] in result_data:
+                                                captured[step["capture"]] = result_data[step["capture"]]
+                                        except (json.JSONDecodeError, TypeError):
+                                            pass
+                        except Exception:
+                            pass
+                        await asyncio.sleep(0.5)
+        else:
+            # Standalone mode — stream scripted events without real MCP calls
+            for step in SCRIPT:
+                reasoning = step["reasoning"]
+                for word in reasoning.split(" "):
+                    yield f"data: {json.dumps({'data': word + ' '})}\n\n"
+                    await asyncio.sleep(0.05)
+                await asyncio.sleep(0.3)
 
-                    await asyncio.sleep(0.5)
+                tool_input = step["input"]
+                tool_event = {"current_tool_use": {"toolUseId": f"tool-{step['tool']}", "name": step["tool"], "input": tool_input}}
+                yield f"data: {json.dumps(tool_event)}\n\n"
+                await asyncio.sleep(0.5)
 
-        # Emit final result (after session is closed cleanly)
+        # Emit final result
         result_event = {
             "result": {
                 "stop_reason": "end_turn",

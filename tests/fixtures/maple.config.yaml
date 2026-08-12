@@ -1,0 +1,10 @@
+# Test config with custom tool and prompt
+experiment:
+  name: Custom Tool Test
+  objective: Test custom tool loading
+
+operator:
+  vision_backend: ""
+  custom_tools:
+    - "custom_tool:hello_world"
+  prompt: "custom_prompt.md"

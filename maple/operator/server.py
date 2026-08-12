@@ -501,8 +501,8 @@ try:
         {"node": h.node, "action": h.action, "args": h.args} for h in _config.operator.post_action_hooks
     ]
     load_custom_tools(_config)
-except Exception:
-    pass  # Config not available (e.g., no maple.config.yaml in CWD)
+except Exception as e:
+    print(f"[MCP] Config auto-load failed: {e}", flush=True)
 
 # ---------------------------------------------------------------------------
 # App factory
