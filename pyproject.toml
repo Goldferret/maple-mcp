@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "maple-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Model-Agnostic Platform for Laboratory Experiments — LLM agents for autonomous MADSci experiments via MCP"
 readme = "README.md"
 license = {text = "MIT"}
