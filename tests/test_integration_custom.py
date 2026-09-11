@@ -67,7 +67,6 @@ class TestCustomTools:
                 time.sleep(2)
 
     @pytest.mark.asyncio
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     async def test_custom_tool_callable(self, custom_services):
         """Custom tool can be called via MCP protocol."""
         import httpx

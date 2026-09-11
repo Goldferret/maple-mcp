@@ -15,8 +15,12 @@ class ExampleVision(VisionBackend):
     the full MAPLE pipeline without real hardware or cameras.
     """
 
-    def detect_objects(self, image_bytes: bytes, config: dict) -> list[dict]:
-        """Return 3 hardcoded blocks in the detection zone."""
+    def detect_objects(self, frames: dict, config: dict) -> list[dict]:
+        """Return 3 hardcoded blocks in the detection zone.
+
+        Ignores `frames` — this demo backend returns fixed positions so the
+        full MAPLE pipeline can run without a real camera.
+        """
         return [
             {
                 "color": "red",
@@ -41,8 +45,8 @@ class ExampleVision(VisionBackend):
             },
         ]
 
-    def verify_goal(self, image_bytes: bytes, config: dict) -> dict:
-        """Always returns success — used with mock agent."""
+    def verify_goal(self, frames: dict, config: dict) -> dict:
+        """Always returns success — used with mock agent. Ignores `frames`."""
         return {
             "success": True,
             "details": "All 3 blocks sorted into correct goal zones",

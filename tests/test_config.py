@@ -3,7 +3,15 @@
 import pytest
 from pathlib import Path
 
-from maple.config import load_config, import_string, load_vision_backend, MapleConfig
+from maple.config import (
+    load_config,
+    import_string,
+    load_vision_backend,
+    load_vision_views,
+    resolve_view,
+    MapleConfig,
+)
+from fastmcp.exceptions import ToolError
 
 
 class TestLoadConfig:
@@ -157,3 +165,141 @@ class TestAgentExtensions:
         assert "extra_hooks" in sig.parameters
         param = sig.parameters["extra_hooks"]
         assert param.default is None
+
+
+# ---------------------------------------------------------------------------
+# Vision view registry
+# ---------------------------------------------------------------------------
+
+
+def _multi_view_config():
+    """A config with two views for routing/resolution tests."""
+    return MapleConfig(**{
+        "operator": {
+            "vision": {
+                "views": {
+                    "block_table": {
+                        "backend": "maple.vision:StubBackend",
+                        "capture": {"node": "DOFBOT_Pro_1", "action": "capture_camera_image"},
+                        "covers": ["DOFBOT_Pro_1"],
+                    },
+                    "ot2_deck": {
+                        "backend": "maple.vision:SecondStubBackend",
+                        "capture": {"node": "OT-2", "action": "capture_camera_image"},
+                        "pre_capture_action": "home_robot",
+                        "covers": ["OT-2"],
+                    },
+                },
+                "default_view": "block_table",
+            }
+        }
+    })
+
+
+class TestLoadVisionViews:
+    def test_builds_registry_with_instantiated_backends(self):
+        from maple.vision import StubBackend, SecondStubBackend
+        state = load_vision_views(_multi_view_config())
+        reg = state["registry"]
+        assert set(reg.keys()) == {"block_table", "ot2_deck"}
+        assert isinstance(reg["block_table"]["backend"], StubBackend)
+        assert isinstance(reg["ot2_deck"]["backend"], SecondStubBackend)
+        assert state["default_view"] == "block_table"
+
+    def test_capture_and_pre_capture_parsed(self):
+        state = load_vision_views(_multi_view_config())
+        reg = state["registry"]
+        assert reg["ot2_deck"]["capture"] == {"node": "OT-2", "action": "capture_camera_image"}
+        assert reg["ot2_deck"]["pre_capture_action"] == "home_robot"
+        assert reg["block_table"]["pre_capture_action"] is None
+        assert reg["block_table"]["covers"] == ["DOFBOT_Pro_1"]
+
+    def test_default_view_falls_back_to_first_when_unset(self):
+        cfg = MapleConfig(**{
+            "operator": {"vision": {"views": {
+                "only": {"backend": "maple.vision:StubBackend",
+                         "capture": {"node": "N", "action": "capture_camera_image"}},
+            }}}
+        })
+        state = load_vision_views(cfg)
+        assert state["default_view"] == "only"
+
+    def test_backward_compat_synthesizes_default_from_vision_backend(self):
+        from maple.vision import StubBackend
+        cfg = MapleConfig(operator={"vision_backend": "maple.vision:StubBackend"})
+        state = load_vision_views(cfg)
+        assert list(state["registry"].keys()) == ["default"]
+        assert state["default_view"] == "default"
+        assert isinstance(state["registry"]["default"]["backend"], StubBackend)
+
+    def test_backward_compat_empty_config_uses_stub(self):
+        from maple.vision import StubBackend
+        state = load_vision_views(MapleConfig())
+        assert isinstance(state["registry"]["default"]["backend"], StubBackend)
+
+    def test_invalid_backend_path_raises(self):
+        cfg = MapleConfig(**{
+            "operator": {"vision": {"views": {
+                "bad": {"backend": "nonexistent_module:Nope",
+                        "capture": {"node": "N", "action": "capture_camera_image"}},
+            }}}
+        })
+        with pytest.raises(ImportError):
+            load_vision_views(cfg)
+
+
+class TestResolveView:
+    def test_view_only(self):
+        state = load_vision_views(_multi_view_config())
+        assert resolve_view("ot2_deck", None, state) == "ot2_deck"
+
+    def test_node_only_resolves_via_covers(self):
+        state = load_vision_views(_multi_view_config())
+        assert resolve_view(None, "OT-2", state) == "ot2_deck"
+        assert resolve_view(None, "DOFBOT_Pro_1", state) == "block_table"
+
+    def test_node_wins_over_view_when_both_given(self):
+        state = load_vision_views(_multi_view_config())
+        # view says block_table, node says OT-2 -> node wins
+        assert resolve_view("block_table", "OT-2", state) == "ot2_deck"
+
+    def test_neither_uses_default(self):
+        state = load_vision_views(_multi_view_config())
+        assert resolve_view(None, None, state) == "block_table"
+
+    def test_unknown_view_raises(self):
+        state = load_vision_views(_multi_view_config())
+        with pytest.raises(ToolError, match="Unknown view"):
+            resolve_view("nope", None, state)
+
+    def test_uncovered_node_raises(self):
+        state = load_vision_views(_multi_view_config())
+        with pytest.raises(ToolError, match="No view covers node"):
+            resolve_view(None, "UnknownNode", state)
+
+    def test_ambiguous_node_coverage_raises(self):
+        cfg = MapleConfig(**{
+            "operator": {"vision": {"views": {
+                "a": {"backend": "maple.vision:StubBackend",
+                      "capture": {"node": "shared", "action": "capture_camera_image"},
+                      "covers": ["shared"]},
+                "b": {"backend": "maple.vision:SecondStubBackend",
+                      "capture": {"node": "shared", "action": "capture_camera_image"},
+                      "covers": ["shared"]},
+            }, "default_view": "a"}}
+        })
+        state = load_vision_views(cfg)
+        with pytest.raises(ToolError, match="covered by multiple views"):
+            resolve_view(None, "shared", state)
+
+    def test_correct_backend_selected_per_view(self):
+        """The resolved view's backend is the right class — routing sanity."""
+        from maple.vision import StubBackend, SecondStubBackend
+        state = load_vision_views(_multi_view_config())
+
+        v1 = resolve_view("block_table", None, state)
+        v2 = resolve_view("ot2_deck", None, state)
+        assert isinstance(state["registry"][v1]["backend"], StubBackend)
+        assert isinstance(state["registry"][v2]["backend"], SecondStubBackend)
+        # And their outputs differ (proves distinct dispatch)
+        assert state["registry"][v2]["backend"].verify_goal({}, {})["marker"] == "second"

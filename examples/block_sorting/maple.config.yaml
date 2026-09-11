@@ -9,7 +9,21 @@ experiment:
     - "Red blocks go to goal zone 1, blue blocks go to goal zone 2"
 
 operator:
-  vision_backend: "vision:ExampleVision"
+  # Vision view registry — each view is a named scene the LLM can observe via
+  # detect(view=...) / verify(view=...). MAPLE captures frame(s) for the view
+  # (running `capture` on the given node) and hands the raw datapoint values to
+  # the view's VisionBackend. The LLM may also pass detect(node=...) and MAPLE
+  # resolves it to the view whose `covers` includes that node (node wins if
+  # both view and node are given).
+  vision:
+    views:
+      block_table:
+        backend: "vision:ExampleVision"
+        capture:
+          node: StubBot
+          action: analyze            # stand-in "capture" for the demo stub node
+        covers: [StubBot]
+    default_view: block_table
 
   # Custom tools to register with the MCP server (module:function format)
   # These are loaded at startup and available to the LLM agent.

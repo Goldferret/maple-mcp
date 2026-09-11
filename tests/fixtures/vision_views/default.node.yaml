@@ -1,0 +1,7 @@
+node_name: default.node
+node_id: 01M28X4DXRP0RYFGVFQHTFZNJN
+node_description: null
+node_type: device
+module_name: experiment_application
+module_version: 0.0.1
+capabilities: null

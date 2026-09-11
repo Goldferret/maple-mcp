@@ -9,8 +9,39 @@ A self-contained example demonstrating the full MAPLE pipeline. Uses a stub robo
 | `vision.py` | `ExampleVision` — hardcoded VisionBackend (3 blocks, always sorted) |
 | `stub_node.py` | Minimal MADSci node with `pick_and_place` action |
 | `mock_agent.py` | Scripted agent — walks through full experiment without an LLM |
-| `maple.config.yaml` | MAPLE config pointing to `vision:ExampleVision` |
+| `maple.config.yaml` | MAPLE config with a `vision` view registry pointing to `vision:ExampleVision` |
 | `.env.example` | Template for service URLs |
+
+## Vision Views
+
+MAPLE resolves detection/verification through a **view registry**. Each view is
+a named scene the agent can observe:
+
+```yaml
+operator:
+  vision:
+    views:
+      block_table:
+        backend: "vision:ExampleVision"   # your VisionBackend (module:Class)
+        capture:
+          node: StubBot                    # node whose capture action grabs a frame
+          action: analyze                  # capture action (a real camera node uses e.g. capture_camera_image)
+        covers: [StubBot]                  # nodes this view can see
+    default_view: block_table
+```
+
+The agent calls `detect(view="block_table")` or `detect(node="StubBot")` — MAPLE
+captures frame(s) for that view, downloads all datapoints the capture produced,
+and hands the raw values to the view's `VisionBackend`. If both `view` and
+`node` are given, `node` wins. With neither, `default_view` is used.
+
+This scales to multi-instrument labs: add another view (e.g. an `ot2_deck` view
+backed by a different `VisionBackend`) and the agent can observe each station
+through its own vision logic — no MAPLE code changes needed.
+
+Your `VisionBackend` is pure: it receives a `frames` dict (`{datapoint_key:
+raw_value}`) and returns results. It never imports MADSci, so it can be
+unit-tested with a saved image and zero infrastructure.
 
 ## Prerequisites
 
@@ -52,7 +83,7 @@ python mock_agent.py
 In a separate terminal:
 
 ```bash
-maple chat --agent operator
+maple chat operator
 ```
 
 Type anything (e.g., "sort the blocks") and press Enter. The mock agent streams a scripted experiment:
@@ -85,10 +116,13 @@ To use a real LLM instead of the mock agent:
    OLLAMA_HOST=http://localhost:11434
    OPERATOR_MODEL=qwen3:8b
    ```
-4. Skip the mock agent — use `maple serve --agent operator --config maple.config.yaml` instead
-5. Run `maple chat --agent operator` and tell it: "Sort the blocks by color"
+4. Skip the mock agent — use `maple serve operator` instead
+5. Run `maple chat operator` and tell it: "Sort the blocks by color"
 
-To use real hardware, replace `ExampleVision` with your own `VisionBackend` subclass and update `vision_backend` in `maple.config.yaml`.
+To use real hardware, replace `ExampleVision` with your own `VisionBackend`
+subclass and point the view's `backend` at it in `maple.config.yaml`. For a
+real camera, set the view's `capture.action` to your camera node's capture
+action (e.g. `capture_camera_image`).
 
 ## Troubleshooting
 

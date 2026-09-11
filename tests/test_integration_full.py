@@ -28,10 +28,16 @@ pytestmark = pytest.mark.integration
 
 
 async def call_tool(url: str, tool_name: str, arguments: dict, token: str = None) -> dict:
-    """Call an MCP tool with a fresh session (avoids cancel scope issues)."""
-    import httpx
+    """Call an MCP tool with a fresh session (avoids cancel scope issues).
+
+    NOTE: uses the deprecated `streamablehttp_client` intentionally. It accepts
+    `headers` directly (for the auth token) and fails fast on a dead target.
+    The successor `streamable_http_client` requires passing a pre-built
+    httpx.AsyncClient and manages its own task group, which deadlocks when
+    driven from module-scoped fixtures under pytest-asyncio. Production code
+    (maple/*/agent.py) already uses the new client; this is test-only.
+    """
     from mcp import ClientSession
-    # Use deprecated streamablehttp_client which accepts headers directly
     from mcp.client.streamable_http import streamablehttp_client
 
     kwargs = {}

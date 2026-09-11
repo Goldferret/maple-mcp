@@ -45,20 +45,24 @@ async def ping(request: Request) -> JSONResponse:
 # State (vision backend + hooks are server-wide; experiments are per-session)
 # ---------------------------------------------------------------------------
 
-_vision_backend: VisionBackend = StubBackend()
+_vision_state: dict = {
+    "registry": {"default": {"backend": StubBackend(), "capture": {"node": None, "action": "capture_camera_image"}, "pre_capture_action": None, "covers": []}},
+    "default_view": "default",
+}
 _post_action_hooks: list = []
 
 
-def configure(vision_backend: VisionBackend = None, post_action_hooks: list = None):
+def configure(vision_state: dict = None, post_action_hooks: list = None):
     """Configure the Operator server at startup.
-    
+
     Args:
-        vision_backend: VisionBackend instance for detection
+        vision_state: Resolved view registry from load_vision_views()
+            ({"registry": {...}, "default_view": ...}).
         post_action_hooks: List of post-action hook configs (node, action, args)
     """
-    global _vision_backend, _post_action_hooks
-    if vision_backend:
-        _vision_backend = vision_backend
+    global _vision_state, _post_action_hooks
+    if vision_state:
+        _vision_state = vision_state
     if post_action_hooks is not None:
         _post_action_hooks = post_action_hooks
 
@@ -171,13 +175,67 @@ def _submit_workflow(action_name: str, node_name: str = None, args: dict = None,
     }
 
 
-def _capture_frame() -> bytes:
-    """Capture camera frame. Returns image bytes.
-    
-    Note: For the stub/demo, returns empty bytes. VisionBackend handles this.
-    Real implementations pass app and dispatch a camera workflow.
+def _capture_frames(app, view_config: dict) -> dict:
+    """Capture frame(s) for a view and return raw datapoint values.
+
+    Runs the optional pre_capture_action (e.g. home_robot) to produce a clean
+    scene, then the capture action, then downloads EVERY datapoint the capture
+    produced and returns them as {datapoint_key: raw_value}.
+
+    The VisionBackend receives this dict and picks the keys it needs — MAPLE
+    does not judge which datapoint is an image; it hands over all raw values.
+
+    Args:
+        app: The session's ExperimentApplication.
+        view_config: Resolved view entry with 'capture' and 'pre_capture_action'.
+
+    Returns:
+        Dict of {datapoint_key: raw_value}. Empty dict if capture produced no
+        datapoints.
     """
-    return b""
+    capture = view_config["capture"]
+    node = capture.get("node")
+    action = capture.get("action", "capture_camera_image")
+    pre = view_config.get("pre_capture_action")
+
+    # Optional: clean the scene before capturing (e.g. home the arm out of view)
+    if pre:
+        try:
+            _submit_workflow(pre, node_name=node, app=app)
+        except Exception as e:
+            app.logger.info(f"pre_capture_action '{pre}' skipped: {e}")
+
+    # Dispatch the capture action
+    wf_def = WorkflowDefinition(
+        name=action,
+        steps=[StepDefinition(
+            name=action,
+            node=node or _get_default_node(app),
+            action=action,
+            args={},
+        )],
+    )
+    result = app.workcell_client.start_workflow(
+        wf_def,
+        await_completion=True,
+        prompt_on_error=False,
+        raise_on_failed=False,
+        raise_on_cancelled=False,
+    )
+    step = result.steps[0]
+    if step.result is None or step.result.datapoints is None:
+        return {}
+
+    dp_dict = step.result.datapoints.model_dump()
+    frames: dict = {}
+    for key, dp_id in dp_dict.items():
+        if not dp_id:
+            continue
+        try:
+            frames[key] = app.data_client.get_datapoint_value(dp_id)
+        except Exception as e:
+            app.logger.info(f"Could not download datapoint '{key}' ({dp_id}): {e}")
+    return frames
 
 
 def _run_post_action_hooks(action_result: dict, app=None):
@@ -318,36 +376,44 @@ async def end_experiment(experiment_id: str, summary: str, ctx: Context) -> dict
 
 
 @mcp.tool
-async def detect(ctx: Context) -> dict:
+async def detect(ctx: Context, view: str = None, node: str = None) -> dict:
     """Observe the workspace and detect objects.
 
-    Captures an image and runs the configured VisionBackend's detection.
+    Captures frame(s) for a view and runs that view's VisionBackend detection.
+
+    Args:
+        view: Named view/scene to observe (e.g. 'block_table'). Optional.
+        node: Node whose scene to observe (e.g. 'DOFBOT_Pro_1'). Optional.
+            If both view and node are given, node takes precedence. If neither
+            is given, the configured default view is used.
 
     Returns:
-        Dict with detections list and count.
+        Dict with detections list, count, and the resolved view.
     """
     from maple.sessions import get_session
+    from maple.config import resolve_view
 
     entry = await get_session(ctx)
     app = entry.app
 
-    # Capture frame
-    color_bytes = _capture_frame()
-    app.logger.info("Detection: frame captured")
+    view_name = resolve_view(view, node, _vision_state)
+    view_config = _vision_state["registry"][view_name]
 
-    # Run VisionBackend
-    detections = _vision_backend.detect_objects(color_bytes, {})
+    frames = _capture_frames(app, view_config)
+    app.logger.info(f"Detection: captured frames for view '{view_name}'")
+
+    detections = view_config["backend"].detect_objects(frames, {})
 
     app.data_client.submit_datapoint(ValueDataPoint(
         label="detection_results",
-        value={"detections": detections, "count": len(detections)},
+        value={"detections": detections, "count": len(detections), "view": view_name},
         ownership_info=OwnershipInfo(experiment_id=app.experiment.experiment_id),
     ))
-    app.logger.info(f"Detection: found {len(detections)} objects")
+    app.logger.info(f"Detection: found {len(detections)} objects (view '{view_name}')")
 
     entry.last_tool_called = "detect"
 
-    return {"detections": detections, "count": len(detections)}
+    return {"detections": detections, "count": len(detections), "view": view_name}
 
 
 # ---------------------------------------------------------------------------
@@ -356,31 +422,40 @@ async def detect(ctx: Context) -> dict:
 
 
 @mcp.tool
-async def verify(ctx: Context) -> dict:
+async def verify(ctx: Context, view: str = None, node: str = None) -> dict:
     """Verify whether the experiment goal has been achieved.
 
-    Captures an image and runs the configured VisionBackend's verification.
+    Captures frame(s) for a view and runs that view's VisionBackend verification.
+
+    Args:
+        view: Named view/scene to verify (e.g. 'block_table'). Optional.
+        node: Node whose scene to verify (e.g. 'DOFBOT_Pro_1'). Optional.
+            If both are given, node takes precedence. If neither is given, the
+            configured default view is used.
 
     Returns:
-        Dict with success status and details.
+        Dict with success status, details, and the resolved view.
     """
     from maple.sessions import get_session
+    from maple.config import resolve_view
 
     entry = await get_session(ctx)
     app = entry.app
 
-    app.logger.info("Verification: capturing frame")
-    color_bytes = _capture_frame()
+    view_name = resolve_view(view, node, _vision_state)
+    view_config = _vision_state["registry"][view_name]
 
-    # Run VisionBackend verification
-    result = _vision_backend.verify_goal(color_bytes, {})
+    app.logger.info(f"Verification: capturing frames for view '{view_name}'")
+    frames = _capture_frames(app, view_config)
+
+    result = view_config["backend"].verify_goal(frames, {})
 
     app.data_client.submit_datapoint(ValueDataPoint(
         label="verification_results",
-        value=result,
+        value={**result, "view": view_name} if isinstance(result, dict) else result,
         ownership_info=OwnershipInfo(experiment_id=app.experiment.experiment_id),
     ))
-    app.logger.info(f"Verification: success={result.get('success')}")
+    app.logger.info(f"Verification: success={result.get('success')} (view '{view_name}')")
 
     entry.last_tool_called = "verify"
     return result
@@ -494,9 +569,9 @@ async def get_node_info(node_name: str, ctx: Context) -> dict:
 # ---------------------------------------------------------------------------
 
 try:
-    from maple.config import load_config, load_vision_backend, load_custom_tools
+    from maple.config import load_config, load_vision_views, load_custom_tools
     _config = load_config()
-    _vision_backend = load_vision_backend(_config)
+    _vision_state = load_vision_views(_config)
     _post_action_hooks = [
         {"node": h.node, "action": h.action, "args": h.args} for h in _config.operator.post_action_hooks
     ]

@@ -58,7 +58,15 @@ experiment:
     - "Only handle one sample at a time"
 
 operator:
-  vision_backend: "vision:MyVision"
+  vision:
+    views:
+      workspace:
+        backend: "vision:MyVision"
+        capture:
+          node: MyRobot
+          action: capture_camera_image
+        covers: [MyRobot]
+    default_view: workspace
   custom_tools:
     - "my_tools:prepare_sample"
   post_action_hooks:
@@ -70,9 +78,13 @@ Infrastructure goes in `.env` (IPs, API keys, model provider).
 
 ## Extending MAPLE
 
+Config keys below are dotted paths into `maple.config.yaml` — e.g.
+`operator.vision.views` is the `views:` key nested under `operator:` → `vision:`.
+
 | Extension Point | Mechanism | Config Key |
 |---|---|---|
-| Vision detection | Subclass `VisionBackend` | `operator.vision_backend` |
+| Vision detection/verification | Subclass `VisionBackend` (pure: `frames` in, results out) | — (referenced by a view's `backend`) |
+| Vision views (scenes + routing) | Declare views mapping cameras/nodes to backends | `operator.vision.views` |
 | MCP tools | `@mcp.tool` decorator | `operator.custom_tools` / `overseer.custom_tools` |
 | Agent hooks | `extra_hooks` param on factory | Programmatic |
 | Post-action hooks | YAML (no code) | `operator.post_action_hooks` |

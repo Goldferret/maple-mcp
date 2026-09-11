@@ -1,0 +1,27 @@
+# Vision view registry test config.
+#
+# Two views, each backed by a distinct routing stub backend. Capture uses the
+# stub node's `analyze` action as a stand-in for a camera (the stub node has no
+# real camera). This exercises the full capture path (workflow -> datapoint
+# download -> frames dict -> backend dispatch) without camera hardware.
+
+experiment:
+  name: Vision View Routing Test
+  objective: Verify view/node routing to the correct VisionBackend
+
+operator:
+  vision:
+    views:
+      view_a:
+        backend: "routing_backends:RoutingStubA"
+        capture:
+          node: StubBot
+          action: analyze
+        covers: [StubBot]
+      view_b:
+        backend: "routing_backends:RoutingStubB"
+        capture:
+          node: StubBot
+          action: analyze
+        covers: [OtherBot]
+    default_view: view_a

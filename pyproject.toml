@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "maple-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "Model-Agnostic Platform for Laboratory Experiments — LLM agents for autonomous MADSci experiments via MCP"
 readme = "README.md"
 license = {text = "MIT"}
@@ -70,6 +70,13 @@ markers = [
     "integration: requires running MAPLE services (deselected by default)",
 ]
 asyncio_mode = "auto"
+filterwarnings = [
+    # Integration test helpers use the deprecated `streamablehttp_client`
+    # intentionally: it accepts `headers` directly (auth token) and fails fast.
+    # The successor requires a pre-built httpx client + task group that
+    # deadlocks under module-scoped fixtures. Production code uses the new API.
+    "ignore:Use `streamable_http_client` instead.:DeprecationWarning",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["maple"]
