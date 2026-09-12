@@ -127,7 +127,8 @@ async def stream(request: dict):
             from mcp import ClientSession
             from mcp.client.streamable_http import streamable_http_client
 
-            async with streamable_http_client(MCP_OPERATOR_URL) as (read, write, _):
+            async with streamable_http_client(MCP_OPERATOR_URL) as streams:
+                read, write = streams[0], streams[1]
                 async with ClientSession(read, write) as session:
                     await session.initialize()
 

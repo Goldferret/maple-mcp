@@ -43,7 +43,8 @@ async def call_tool(tool_name: str, arguments: dict, token: str) -> dict:
     try:
         async with streamable_http_client(
             OPERATOR_URL, http_client=auth_client
-        ) as (read, write, _):
+        ) as streams:
+            read, write = streams[0], streams[1]
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)

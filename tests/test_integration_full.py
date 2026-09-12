@@ -46,7 +46,8 @@ async def call_tool(url: str, tool_name: str, arguments: dict, token: str = None
     auth_client = create_mcp_http_client(headers=headers)
 
     try:
-        async with streamable_http_client(url, http_client=auth_client) as (read, write, _):
+        async with streamable_http_client(url, http_client=auth_client) as streams:
+            read, write = streams[0], streams[1]
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(tool_name, arguments)
