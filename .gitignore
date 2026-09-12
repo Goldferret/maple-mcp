@@ -36,3 +36,7 @@ sessions/
 .coverage
 htmlcov/
 scripts/
+
+# MADSci ExperimentApplication auto-generated node artifacts
+default.node.yaml
+default.node.info.yaml

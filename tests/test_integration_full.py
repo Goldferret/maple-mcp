@@ -30,29 +30,33 @@ pytestmark = pytest.mark.integration
 async def call_tool(url: str, tool_name: str, arguments: dict, token: str = None) -> dict:
     """Call an MCP tool with a fresh session (avoids cancel scope issues).
 
-    NOTE: uses the deprecated `streamablehttp_client` intentionally. It accepts
-    `headers` directly (for the auth token) and fails fast on a dead target.
-    The successor `streamable_http_client` requires passing a pre-built
-    httpx.AsyncClient and manages its own task group, which deadlocks when
-    driven from module-scoped fixtures under pytest-asyncio. Production code
-    (maple/*/agent.py) already uses the new client; this is test-only.
+    Uses streamable_http_client (present across mcp versions; the older
+    `streamablehttp_client` alias was removed in newer mcp). Auth header is
+    carried by a pre-built httpx.AsyncClient since the client takes no
+    `headers` kwarg.
     """
+    import httpx
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 
-    kwargs = {}
-    if token:
-        kwargs["headers"] = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    # Use create_mcp_http_client (not a bare AsyncClient) so the client carries
+    # the MCP streaming timeouts — a bare client has no read timeout and its
+    # SSE GET stream never closes, hanging aclose().
+    auth_client = create_mcp_http_client(headers=headers)
 
-    async with streamablehttp_client(url, **kwargs) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, arguments)
-            text = ""
-            for content in result.content:
-                if hasattr(content, "text"):
-                    text += content.text
-            return {"text": text, "error": result.isError}
+    try:
+        async with streamable_http_client(url, http_client=auth_client) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                text = ""
+                for content in result.content:
+                    if hasattr(content, "text"):
+                        text += content.text
+                return {"text": text, "error": result.isError}
+    finally:
+        await auth_client.aclose()
 
 
 # Shared test token for operator tools

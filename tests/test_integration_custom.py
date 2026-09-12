@@ -71,7 +71,7 @@ class TestCustomTools:
         """Custom tool can be called via MCP protocol."""
         import httpx
         from mcp import ClientSession
-        from mcp.client.streamable_http import streamablehttp_client
+        from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 
         # Wait for server
         import time as _time
@@ -84,21 +84,27 @@ class TestCustomTools:
             except Exception:
                 _time.sleep(2)
 
-        async with streamablehttp_client(
-            "http://localhost:8102/mcp",
+        auth_client = create_mcp_http_client(
             headers={"Authorization": "Bearer 12345678-1234-4234-8234-123456789abc"}
-        ) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+        )
+        try:
+            async with streamable_http_client(
+                "http://localhost:8102/mcp",
+                http_client=auth_client,
+            ) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
 
-                # List tools — hello_world should be there
-                tools = await session.list_tools()
-                tool_names = [t.name for t in tools.tools]
-                assert "hello_world" in tool_names, f"hello_world not in {tool_names}"
+                    # List tools — hello_world should be there
+                    tools = await session.list_tools()
+                    tool_names = [t.name for t in tools.tools]
+                    assert "hello_world" in tool_names, f"hello_world not in {tool_names}"
 
-                # Call it
-                result = await session.call_tool("hello_world", {"name": "MAPLE"})
-                assert not result.isError
-                text = result.content[0].text
-                data = json.loads(text)
-                assert data["greeting"] == "Hello, MAPLE!"
+                    # Call it
+                    result = await session.call_tool("hello_world", {"name": "MAPLE"})
+                    assert not result.isError
+                    text = result.content[0].text
+                    data = json.loads(text)
+                    assert data["greeting"] == "Hello, MAPLE!"
+        finally:
+            await auth_client.aclose()

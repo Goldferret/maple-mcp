@@ -25,26 +25,35 @@ pytestmark = pytest.mark.integration
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "vision_views"
 OPERATOR_URL = "http://localhost:8102/mcp"
-TEST_TOKEN = str(uuid.uuid4())
 
 
-async def call_tool(tool_name: str, arguments: dict, token: str = TEST_TOKEN) -> dict:
-    # Uses deprecated streamablehttp_client intentionally — accepts headers
-    # directly and fails fast. See test_integration_full.py for rationale.
+async def call_tool(tool_name: str, arguments: dict, token: str) -> dict:
+    """Call an MCP tool using the streamable_http_client (works across mcp versions).
+
+    Auth header is carried by a pre-built httpx.AsyncClient, since the client
+    does not accept a `headers` kwarg directly.
+    """
+    import httpx
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamablehttp_client
+    from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
 
-    async with streamablehttp_client(
-        OPERATOR_URL, headers={"Authorization": f"Bearer {token}"}
-    ) as (read, write, _):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(tool_name, arguments)
-            text = ""
-            for content in result.content:
-                if hasattr(content, "text"):
-                    text += content.text
-            return {"text": text, "error": result.isError}
+    # create_mcp_http_client carries MCP streaming timeouts (a bare AsyncClient
+    # has no read timeout and its SSE GET stream never closes -> aclose hangs).
+    auth_client = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
+    try:
+        async with streamable_http_client(
+            OPERATOR_URL, http_client=auth_client
+        ) as (read, write, _):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.call_tool(tool_name, arguments)
+                text = ""
+                for content in result.content:
+                    if hasattr(content, "text"):
+                        text += content.text
+                return {"text": text, "error": result.isError}
+    finally:
+        await auth_client.aclose()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -84,23 +93,29 @@ def vision_services():
     subprocess.run(["maple", "down"], capture_output=True)
 
 
-@pytest.fixture(scope="module")
-def experiment(vision_services):
-    """Start an experiment so detect/verify have an active session."""
-    import asyncio
-    r = asyncio.run(
-        call_tool("start_experiment", {"name": "vv-test", "description": "vision view test"})
-    )
+@pytest.fixture
+async def experiment(vision_services):
+    """Per-test active experiment on a fresh token.
+
+    Async + function-scoped: runs on the same event loop as the test (under
+    asyncio_mode=auto), so there is no competing loop and no task-group
+    deadlock. Each test gets its own token, so the one-experiment-per-token
+    rule never collides across tests.
+    """
+    token = str(uuid.uuid4())
+    r = await call_tool("start_experiment",
+                        {"name": "vv-test", "description": "vision view test"},
+                        token=token)
     assert not r["error"], r["text"]
-    yield
-    # end_experiment requires verify immediately before; just let teardown reap.
+    yield token
+    # Teardown reaps the session (verify-before-end rule makes explicit end awkward).
 
 
 class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_detect_default_view(self, experiment):
         """No view/node -> default_view (view_a -> RoutingStubA)."""
-        r = await call_tool("detect", {})
+        r = await call_tool("detect", {}, token=experiment)
         assert not r["error"], r["text"]
         data = json.loads(r["text"])
         assert data["view"] == "view_a"
@@ -109,7 +124,7 @@ class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_detect_explicit_view_b(self, experiment):
         """view=view_b -> RoutingStubB."""
-        r = await call_tool("detect", {"view": "view_b"})
+        r = await call_tool("detect", {"view": "view_b"}, token=experiment)
         assert not r["error"], r["text"]
         data = json.loads(r["text"])
         assert data["view"] == "view_b"
@@ -118,7 +133,7 @@ class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_detect_by_node_resolves_view(self, experiment):
         """node=OtherBot is covered by view_b."""
-        r = await call_tool("detect", {"node": "OtherBot"})
+        r = await call_tool("detect", {"node": "OtherBot"}, token=experiment)
         assert not r["error"], r["text"]
         data = json.loads(r["text"])
         assert data["view"] == "view_b"
@@ -127,7 +142,7 @@ class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_node_wins_over_view(self, experiment):
         """view=view_a + node=OtherBot -> node wins -> view_b."""
-        r = await call_tool("detect", {"view": "view_a", "node": "OtherBot"})
+        r = await call_tool("detect", {"view": "view_a", "node": "OtherBot"}, token=experiment)
         assert not r["error"], r["text"]
         data = json.loads(r["text"])
         assert data["view"] == "view_b"
@@ -136,7 +151,7 @@ class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_capture_produced_frames(self, experiment):
         """The capture path actually downloaded a datapoint into frames."""
-        r = await call_tool("detect", {"view": "view_a"})
+        r = await call_tool("detect", {"view": "view_a"}, token=experiment)
         data = json.loads(r["text"])
         # analyze action returns a json_result datapoint -> frames has that key
         assert data["detections"][0]["frame_keys"], "expected at least one frame key"
@@ -144,13 +159,13 @@ class TestVisionViewRouting:
     @pytest.mark.asyncio
     async def test_verify_routes_to_view_backend(self, experiment):
         """verify(view=view_b) -> RoutingStubB.verify_goal."""
-        r = await call_tool("verify", {"view": "view_b"})
+        r = await call_tool("verify", {"view": "view_b"}, token=experiment)
         assert not r["error"], r["text"]
         data = json.loads(r["text"])
         assert data["backend"] == "B"
 
     @pytest.mark.asyncio
     async def test_unknown_view_errors(self, experiment):
-        r = await call_tool("detect", {"view": "nonexistent"})
+        r = await call_tool("detect", {"view": "nonexistent"}, token=experiment)
         assert r["error"]
         assert "Unknown view" in r["text"]
