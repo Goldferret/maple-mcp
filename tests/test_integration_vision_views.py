@@ -96,20 +96,31 @@ def vision_services():
 
 @pytest.fixture
 async def experiment(vision_services):
-    """Per-test active experiment on a fresh token.
+    """Per-test active experiment on a fresh token, explicitly ended in teardown.
 
-    Async + function-scoped: runs on the same event loop as the test (under
-    asyncio_mode=auto), so there is no competing loop and no task-group
-    deadlock. Each test gets its own token, so the one-experiment-per-token
-    rule never collides across tests.
+    Async + function-scoped: runs on the test's event loop (asyncio_mode=auto),
+    no competing-loop deadlock. Each test gets its own token.
+
+    IMPORTANT: the experiment MUST be ended in teardown. On MADSci >=0.7 the
+    experiment holds a file lock (~1 min TTL); if we leak it, the next test's
+    start_experiment fails with 'Cannot acquire lock'. end_experiment requires
+    verify immediately before it, so teardown does verify -> end.
     """
     token = str(uuid.uuid4())
     r = await call_tool("start_experiment",
                         {"name": "vv-test", "description": "vision view test"},
                         token=token)
     assert not r["error"], r["text"]
+    exp_id = json.loads(r["text"])["experiment_id"]
     yield token
-    # Teardown reaps the session (verify-before-end rule makes explicit end awkward).
+    # Teardown: satisfy verify-before-end gate, then end to release the lock.
+    try:
+        await call_tool("verify", {}, token=token)
+        await call_tool("end_experiment",
+                        {"experiment_id": exp_id, "summary": "test teardown"},
+                        token=token)
+    except Exception:
+        pass  # Best-effort cleanup; don't fail teardown.
 
 
 class TestVisionViewRouting:
