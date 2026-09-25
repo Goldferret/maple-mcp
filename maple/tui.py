@@ -77,13 +77,14 @@ class MapleChatApp(App):
         Binding("ctrl+q", "quit", "Quit"),
     ]
 
-    def __init__(self, agent: str = "operator", host: str = "localhost", session_id: str = None, **kwargs):
+    def __init__(self, agent: str = "operator", host: str = "localhost", session_id: str = None, test: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._agent = agent
         self._port = AGENT_PORTS.get(agent, 8202)
         self._host = host
         self._base_url = f"http://{host}:{self._port}"
         self._session_id = session_id or str(uuid.uuid4())
+        self._test = test
         self._client: httpx.AsyncClient | None = None
 
     def compose(self) -> ComposeResult:
@@ -105,12 +106,48 @@ class MapleChatApp(App):
             status.connected = False
 
         # Load previous conversation if resuming
-        self._load_session_history()
+        history_loaded = self._load_session_history()
 
         self.query_one(Input).focus()
 
-    def _load_session_history(self):
-        """Load and display previous messages from session files."""
+        # Auto-send an opening brief on a fresh session (not on resume). In test
+        # mode this is the bundled collaborative brief; otherwise it's the
+        # config.experiment brief if one is defined. The agent's response streams
+        # in as the first message the user sees — no user bubble is shown.
+        if status.connected and not history_loaded:
+            brief = self._opening_brief()
+            if brief:
+                self.stream_turn(brief)
+
+    def _opening_brief(self) -> str | None:
+        """Build the opening brief message (JSON) to auto-send, or None.
+
+        - test mode: bundled collaborative brief (maple/operator/test_brief.yaml)
+        - otherwise: config.experiment if its objective is non-empty
+        YAML is authored for humans; serialized to JSON for the agent.
+        """
+        import yaml
+
+        try:
+            if self._test:
+                brief_path = Path(__file__).parent / "operator" / "test_brief.yaml"
+                data = yaml.safe_load(brief_path.read_text())
+                return json.dumps(data)
+
+            from maple.config import load_config
+            cfg = load_config()
+            if cfg.experiment.objective.strip():
+                return json.dumps(cfg.experiment.model_dump())
+        except Exception:
+            return None
+        return None
+
+    def _load_session_history(self) -> bool:
+        """Load and display previous messages from session files.
+
+        Returns True if any prior messages were loaded (resumed session),
+        False for a fresh session.
+        """
         from pathlib import Path
         import json as _json
 
@@ -119,7 +156,7 @@ class MapleChatApp(App):
             / f"session_{self._session_id}" / "agents" / "agent_default" / "messages"
         )
         if not session_dir.exists():
-            return
+            return False
 
         log = self.query_one("#log", VerticalScroll)
         msg_files = sorted(session_dir.glob("message_*.json"), key=lambda f: int(f.stem.split("_")[1]))
@@ -149,6 +186,7 @@ class MapleChatApp(App):
                 continue
 
         log.scroll_end(animate=False)
+        return len(msg_files) > 0
 
     async def on_unmount(self) -> None:
         if self._client:
@@ -266,8 +304,8 @@ class MapleChatApp(App):
 # ---------------------------------------------------------------------------
 
 
-def run_chat(agent: str = "operator", host: str = "localhost", session_id: str = None):
+def run_chat(agent: str = "operator", host: str = "localhost", session_id: str = None, test: bool = False):
     """Launch the MAPLE chat TUI."""
     import uuid
-    app = MapleChatApp(agent=agent, host=host, session_id=session_id or str(uuid.uuid4()))
+    app = MapleChatApp(agent=agent, host=host, session_id=session_id or str(uuid.uuid4()), test=test)
     app.run()

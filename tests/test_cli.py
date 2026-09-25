@@ -47,6 +47,12 @@ class TestHelp:
         assert "operator" in result.output
         assert "overseer" in result.output
 
+    def test_chat_operator_has_test_flag(self):
+        result = runner.invoke(app, ["chat", "operator", "--help"], color=False)
+        assert result.exit_code == 0
+        output = _strip_ansi(result.output)
+        assert "--test" in output
+
     def test_down_help(self):
         result = runner.invoke(app, ["down", "--help"], color=False)
         assert result.exit_code == 0

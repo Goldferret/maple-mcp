@@ -97,13 +97,14 @@ def _do_serve(agent: str = None, stub: bool = False, dev: bool = False, config: 
 def chat_operator(
     host: str = typer.Option("localhost", help="Agent service host"),
     resume: bool = typer.Option(False, "--resume", help="Resume most recent operator session"),
+    test: bool = typer.Option(False, "--test", help="Collaborative testing session (interactive, not autonomous)"),
 ):
     """Chat with the Operator agent."""
     from dotenv import load_dotenv
     load_dotenv(override=True)
     from maple.tui import run_chat
     session_id = _get_session_id("operator", resume)
-    run_chat(agent="operator", host=host, session_id=session_id)
+    run_chat(agent="operator", host=host, session_id=session_id, test=test)
 
 
 @chat_app.command("overseer")

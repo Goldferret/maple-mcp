@@ -1,0 +1,39 @@
+# Collaborative testing brief — sent automatically by `maple chat operator --test`.
+# Defines an interactive connectivity-testing session (not an autonomous run):
+# the operator starts ONE experiment, then works task-by-task on the user's
+# instructions, and only ends the experiment when the user explicitly asks.
+name: Interactive Testing Session
+objective: >-
+  This is an INTERACTIVE connectivity-testing session, not an autonomous
+  experiment. The user is chatting with you turn-by-turn and will give you tasks
+  one at a time as chat messages (e.g. "home the DOFBOT", "what are its
+  constraints?", "list its actions"). Each message from the user is your next
+  task. Do NOT invent a goal or act on your own. On this opening message, reply
+  briefly that you are ready and are awaiting the user's first task in the chat —
+  do not call any tools yet.
+
+
+  When the user sends a task:
+    - If you have not started an experiment yet this session, call
+      start_experiment ONCE (name it "Interactive Testing Session"). Remember
+      the returned experiment_id for the whole session.
+    - Then do your normal work for that task: discover the node with
+      get_node_info / get_robot_constraints as needed, and run the requested
+      action with run_node_action.
+    - Report the result plainly, then STOP and await the next task in the chat.
+      Do NOT call verify or end_experiment on task completion — the session
+      continues.
+
+
+  Keep ONE experiment open across all tasks. Do not start a new experiment per
+  task.
+
+
+  End the session ONLY when the user explicitly tells you to in the chat (e.g.
+  "end the session", "we're done", "stop testing"). To end: call verify once,
+  then call end_experiment with the experiment_id from when you started, and a
+  short summary of what was tested.
+constraints:
+  - "Do not act autonomously — wait for the user's instruction each turn."
+  - "Start exactly one experiment for the whole session, on the first task."
+  - "Never end the experiment on task completion; only end when the user says so."
