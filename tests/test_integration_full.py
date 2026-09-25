@@ -293,19 +293,34 @@ class TestOperatorTools:
 
     @pytest.mark.asyncio
     async def test_get_robot_constraints(self):
-        # Start experiment first
+        """StubBot declares constraints in its config; they must flow through."""
+        import json
         await call_tool(OPERATOR_URL, "start_experiment", {
             "name": "Constraints Test",
             "description": "test",
         }, token=TEST_TOKEN)
         r = await call_tool(OPERATOR_URL, "get_robot_constraints", {"node_name": "StubBot"}, token=TEST_TOKEN)
-        # May not be implemented for stub — just check it doesn't crash
-        assert r["text"] is not None
-        # Cleanup
-        await call_tool(OPERATOR_URL, "end_experiment", {
-            "experiment_id": "dummy",
-            "summary": "cleanup",
+        assert not r["error"], r["text"]
+        data = json.loads(r["text"])
+        # The stub node declares these in StubNodeConfig — confirm the node-published
+        # constraints reach the tool (not the "unspecified" placeholder).
+        assert data["node_name"] == "StubBot"
+        assert len(data["constraints"]) >= 1
+        assert any("gripper" in c.lower() for c in data["constraints"]), data["constraints"]
+        assert "No constraints declared" not in data["description"]
+
+    @pytest.mark.asyncio
+    async def test_get_robot_constraints_unknown_node(self):
+        """An unknown/undeclared node yields the explicit placeholder, not a crash."""
+        import json
+        await call_tool(OPERATOR_URL, "start_experiment", {
+            "name": "Constraints Test 2", "description": "test",
         }, token=TEST_TOKEN)
+        r = await call_tool(OPERATOR_URL, "get_robot_constraints", {"node_name": "NoSuchNode"}, token=TEST_TOKEN)
+        assert not r["error"], r["text"]
+        data = json.loads(r["text"])
+        assert data["constraints"] == []
+        assert "No constraints declared" in data["description"]
 
 
 # ---------------------------------------------------------------------------

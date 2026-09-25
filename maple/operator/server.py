@@ -506,21 +506,41 @@ async def run_node_action(node_name: str, action_name: str, ctx: Context, parame
 async def get_robot_constraints(node_name: str, ctx: Context) -> dict:
     """Get physical constraints and capabilities of a robot.
 
+    Reads constraints the node declares in its config (published via node info).
+    If the node declares none, returns a placeholder telling the operator the
+    constraints are unspecified — so it's obvious they need to be configured on
+    the node, rather than silently assuming a (possibly wrong) robot model.
+
     Args:
         node_name: Name of the robot node
     """
     from maple.sessions import get_session
 
-    await get_session(ctx)  # Verify experiment is active
+    entry = await get_session(ctx)
+    app = entry.app
 
+    try:
+        nodes = app.workcell_client.get_nodes()
+        config = (nodes.get(node_name, {}).get("info") or {}).get("config") or {}
+        if config.get("constraints"):
+            return {
+                "node_name": node_name,
+                "description": config.get("constraint_description",
+                                         "No description provided."),
+                "constraints": config["constraints"],
+            }
+    except Exception:
+        pass
+
+    # Node declared no constraints — make the gap explicit.
     return {
         "node_name": node_name,
-        "description": "Robotic manipulator with single gripper.",
-        "constraints": [
-            "Single gripper. Can hold one object at a time.",
-            "Sequential execution. One action at a time.",
-            "Pixel-based targeting. Actions use pixel coordinates from overhead camera.",
-        ],
+        "description": (
+            f"No constraints declared for '{node_name}'. Declare them in the "
+            f"node's config (constraints / constraint_description) so the agent "
+            f"can reason about this robot's physical capabilities."
+        ),
+        "constraints": [],
     }
 
 
