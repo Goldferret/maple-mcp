@@ -26,6 +26,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 @pytest.fixture(scope="module")
 def custom_services():
     """Start operator with custom config from fixtures dir."""
+    from tests.helpers import clean_slate
+    clean_slate()
+
     env = os.environ.copy()
     env.update({
         "WORKCELL_SERVER_URL": "http://localhost:8005/",
@@ -49,7 +52,7 @@ def custom_services():
     time.sleep(5)
     yield
 
-    subprocess.run(["maple", "down"], capture_output=True)
+    clean_slate()
 
 
 class TestCustomTools:

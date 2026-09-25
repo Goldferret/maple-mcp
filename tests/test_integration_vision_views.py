@@ -60,6 +60,10 @@ async def call_tool(tool_name: str, arguments: dict, token: str) -> dict:
 @pytest.fixture(scope="module", autouse=True)
 def vision_services():
     """Start stub node + operator using the vision_views fixture config."""
+    from tests.helpers import clean_slate, wait_for_node_ready
+
+    clean_slate()  # ensure port 2000 free before starting
+
     env = os.environ.copy()
     env.update({
         "WORKCELL_SERVER_URL": "http://localhost:8005/",
@@ -76,22 +80,24 @@ def vision_services():
     subprocess.run(["maple", "serve", "stub"], cwd=str(FIXTURES_DIR), env=env,
                    capture_output=True, text=True)
 
-    time.sleep(5)
+    wait_for_node_ready()
 
-    # Wait for StubBot ready
+    # Wait for StubBot ready in the workcell
     import httpx
     for _ in range(30):
         try:
             resp = httpx.get("http://localhost:8005/nodes", timeout=3)
-            if resp.status_code == 200 and resp.json().get("StubBot", {}).get("status", {}).get("ready"):
-                break
+            if resp.status_code == 200:
+                status = resp.json().get("StubBot", {}).get("status", {})
+                if status and not status.get("errored", True) and not status.get("initializing", False):
+                    break
         except Exception:
             pass
         time.sleep(1)
 
     yield
 
-    subprocess.run(["maple", "down"], capture_output=True)
+    clean_slate()
 
 
 @pytest.fixture

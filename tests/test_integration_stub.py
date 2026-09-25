@@ -31,6 +31,9 @@ def stub_stack():
     """Start the stub stack, yield, then tear down."""
     import subprocess
     import os
+    from tests.helpers import clean_slate, wait_for_node_ready
+
+    clean_slate()  # ensure port 2000 is free before we start
 
     env = os.environ.copy()
     env.update({
@@ -56,12 +59,12 @@ def stub_stack():
     )
     assert result.returncode == 0, f"maple serve --stub failed: {result.stdout}\n{result.stderr}"
 
-    # Wait for services to be ready
-    time.sleep(5)
+    # Wait until the stub node is actually reachable (RestNode startup is slower
+    # than a plain server — don't rely on a fixed sleep).
+    wait_for_node_ready()
     yield
 
-    # Teardown
-    subprocess.run(["maple", "down"], capture_output=True)
+    clean_slate()  # stop services and wait for port 2000 to be released
 
 
 # ---------------------------------------------------------------------------
@@ -79,9 +82,16 @@ class TestStubServe:
         assert "mock-agent" in result.stdout
 
     def test_stub_node_health(self):
-        resp = httpx.get("http://localhost:2000/health", timeout=5)
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        import time
+        for _ in range(10):
+            try:
+                resp = httpx.get("http://localhost:2000/status", timeout=5)
+                if resp.status_code == 200:
+                    assert resp.json()["errored"] is False
+                    return
+            except httpx.ConnectError:
+                time.sleep(2)
+        pytest.fail("Stub node /status not responding after retries")
 
     def test_operator_mcp_ping(self):
         import time

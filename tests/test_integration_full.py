@@ -75,6 +75,9 @@ def full_stack():
     """Start the full stack + stub node, yield, then tear down."""
     import os
     from pathlib import Path
+    from tests.helpers import clean_slate, wait_for_node_ready
+
+    clean_slate()  # ensure port 2000 free before starting
 
     env = os.environ.copy()
     env.update({
@@ -97,7 +100,8 @@ def full_stack():
     r2 = subprocess.run(["maple", "serve", "overseer"], cwd=cwd, env=env, capture_output=True, text=True)
     print(f"[fixture] serve --agent overseer: exit={r2.returncode} stdout={r2.stdout.strip()}")
 
-    time.sleep(5)  # Wait for services to start
+    time.sleep(2)  # brief settle for service processes
+    wait_for_node_ready()  # stub node reachable before workcell poll check
 
     # Wait for StubBot to be ready in the workcell manager
     import httpx
@@ -108,7 +112,7 @@ def full_stack():
                 nodes = resp.json()
                 stub = nodes.get("StubBot", {})
                 status = stub.get("status", {})
-                if status.get("ready"):
+                if status and not status.get("errored", True) and not status.get("initializing", False):
                     break
         except Exception:
             pass
@@ -116,7 +120,7 @@ def full_stack():
 
     yield
 
-    subprocess.run(["maple", "down"], capture_output=True)
+    clean_slate()
 
 
 # ---------------------------------------------------------------------------
