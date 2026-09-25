@@ -22,9 +22,18 @@ maple down                    # Stop all services
 For a real LLM experiment:
 ```bash
 maple serve operator          # Start with your configured model
-maple chat operator           # Run an experiment
+maple chat operator           # Run — auto-sends your experiment brief (see below)
 maple chat operator --resume  # Pick up where you left off
+maple chat operator --test    # Collaborative session — drive the robot turn-by-turn
 ```
+
+`maple chat operator` auto-sends the `experiment:` block from your
+`maple.config.yaml` as the opening brief, so the agent starts running as soon as
+the TUI opens (only on a fresh session, and only if an objective is set). Use
+`--test` for an interactive session instead: the agent starts one experiment,
+then waits and executes tasks you type ("home the DOFBOT", "what are its
+constraints?") until you tell it to stop — useful for connectivity checks and
+exploring a new robot.
 
 See [`examples/block_sorting/`](examples/block_sorting/) for a complete walkthrough.
 
@@ -40,11 +49,14 @@ Requires Python 3.10+ and a running [MADSci](https://github.com/AD-SDL/MADSci) l
 
 ```
 maple serve {all, operator, overseer, stub, mock} [--dev]
-maple chat {operator, overseer} [--resume]
+maple chat {operator, overseer} [--resume] [--test]
 maple down
 maple status
 maple logs
 ```
+
+`--test` (operator only): collaborative mode — interactive, turn-by-turn control
+instead of an autonomous run.
 
 ## Configuration
 
@@ -75,6 +87,12 @@ operator:
 ```
 
 Infrastructure goes in `.env` (IPs, API keys, model provider).
+
+The `experiment:` block is the brief the Operator runs. `maple chat operator`
+serializes it and sends it as the opening message on a fresh session, so the
+agent begins autonomously when the TUI opens. Leave `objective` empty to disable
+auto-send and type the brief yourself. `--test` ignores this block and sends the
+built-in collaborative brief instead.
 
 ## Extending MAPLE
 

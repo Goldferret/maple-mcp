@@ -117,7 +117,10 @@ To use a real LLM instead of the mock agent:
    OPERATOR_MODEL=qwen3:8b
    ```
 4. Skip the mock agent — use `maple serve operator` instead
-5. Run `maple chat operator` and tell it: "Sort the blocks by color"
+5. Run `maple chat operator`. This config has an `experiment:` block, so the
+   agent auto-starts on that brief ("Sort colored blocks...") as soon as the TUI
+   opens — no need to type the goal. To drive the robot interactively instead,
+   run `maple chat operator --test` and give it tasks one at a time.
 
 To use real hardware, replace `ExampleVision` with your own `VisionBackend`
 subclass and point the view's `backend` at it in `maple.config.yaml`. For a
