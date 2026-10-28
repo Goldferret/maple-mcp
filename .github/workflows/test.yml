@@ -54,13 +54,24 @@ jobs:
         run: |
           sed -i "s|ghcr.io/ad-sdl/madsci:v0.5.0|ghcr.io/ad-sdl/madsci:${{ matrix.madsci-version }}|g" docker-compose.ci.yaml
           docker compose -f docker-compose.ci.yaml up -d
-          echo "Waiting for services to be ready..."
-          sleep 20
 
-      - name: Verify services are up
+      - name: Wait for services to be ready
         run: |
-          curl -sf http://localhost:8001/health || curl -sf http://localhost:8001/ || (echo "Event Manager not ready" && exit 1)
-          curl -sf http://localhost:8005/health || curl -sf http://localhost:8005/ || (echo "Workcell Manager not ready" && exit 1)
+          for mgr in "Event Manager:8001" "Workcell Manager:8005"; do
+            name="${mgr%%:*}"; port="${mgr##*:}"
+            echo "Waiting for $name on :$port ..."
+            for i in $(seq 1 60); do
+              if curl -sf "http://localhost:$port/health" >/dev/null 2>&1 || curl -sf "http://localhost:$port/" >/dev/null 2>&1; then
+                echo "✓ $name ready"; break
+              fi
+              if [ "$i" -eq 60 ]; then
+                echo "::error::$name not ready after 120s"
+                docker compose -f docker-compose.ci.yaml logs --tail=50
+                exit 1
+              fi
+              sleep 2
+            done
+          done
           echo "✓ MADSci ${{ matrix.madsci-version }} services ready"
 
       - name: Create .env for integration tests
