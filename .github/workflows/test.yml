@@ -16,10 +16,7 @@ on:
 
 jobs:
   unit:
-    # Pinned to 24.04 (kernel 6.8): ubuntu-latest moved to a 6.19–7.0.13 kernel
-    # that crashes mongo:8.0 (MongoDB SERVER-121912). Revert to ubuntu-latest once
-    # the runner kernel is >= 7.0.14 or MongoDB ships the TCMalloc fix. See issue.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
@@ -34,7 +31,7 @@ jobs:
         run: pytest -m "not integration" --tb=short
 
   integration:
-    runs-on: ubuntu-24.04  # pinned for mongo:8.0 kernel compat — see unit job note
+    runs-on: ubuntu-latest
     needs: unit
     strategy:
       matrix:

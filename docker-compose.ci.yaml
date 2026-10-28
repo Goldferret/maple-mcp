@@ -20,6 +20,12 @@ services:
     container_name: mongodb
     image: mongo:8.0
     network_mode: host
+    # Work around MongoDB SERVER-121912: on kernels 6.19-7.0.13, mongo:8.0's
+    # TCMalloc trips the rseq ABI and refuses to start. Disabling rseq lets it
+    # run. Keep mongo:8.0 — do NOT bump to 8.2 (guard removed there -> silent
+    # SIGSEGV under load). Remove once runners reach kernel >= 7.0.14. See issue #1.
+    environment:
+      - GLIBC_TUNABLES=glibc.pthread.rseq=1
     volumes:
       - mongodb_data:/data/db
 
