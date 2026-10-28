@@ -90,8 +90,9 @@ def create_overseer_agent(session_id: str, extra_hooks: list = None) -> Agent:
 
     model = _create_model()
     token = get_or_create_token()
-    import httpx
-    auth_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {token}"})
+    from mcp.shared._httpx_utils import create_mcp_http_client
+    # SDK factory keeps MCP-recommended timeouts (300s read) for long node actions.
+    auth_client = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
     mcp_client = MCPClient(lambda: streamable_http_client(
         MCP_OVERSEER_URL,
         http_client=auth_client,

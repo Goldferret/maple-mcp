@@ -138,11 +138,12 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         extra_hooks: Additional Strands HookProvider instances to attach.
     """
     from maple.auth import get_or_create_token
-    import httpx
+    from mcp.shared._httpx_utils import create_mcp_http_client
 
     model = _create_model()
     token = get_or_create_token()
-    auth_client = httpx.AsyncClient(headers={"Authorization": f"Bearer {token}"})
+    # SDK factory keeps MCP-recommended timeouts (300s read) for long node actions.
+    auth_client = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
     mcp_client = MCPClient(lambda: streamable_http_client(
         MCP_OPERATOR_URL,
         http_client=auth_client,
