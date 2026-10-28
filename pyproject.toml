@@ -36,6 +36,9 @@ dependencies = [
     # unpack. Pin to a known-good coherent pair.
     "fastmcp>=3.0.0,<4.0.0",
     "mcp>=1.29.0,<2.0.0",
+    # pydantic 2.14 breaks fastmcp 3.4.x serialization (SERVER-style TypeError in
+    # exclude_unset_by_default). fastmcp declares no upper bound, so cap it here. See #2.
+    "pydantic>=2.11.7,<2.14",
     "openai>=1.0.0",
     "typer>=0.9.0",
     "python-dotenv>=1.0.0",
