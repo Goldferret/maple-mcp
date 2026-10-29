@@ -86,6 +86,11 @@ class MapleChatApp(App):
         self._session_id = session_id or str(uuid.uuid4())
         self._test = test
         self._client: httpx.AsyncClient | None = None
+        # Tool-activity timer state (input-box status for tools running >3s)
+        self._tool_delay_timer = None   # fires after 3s to start showing status
+        self._tool_tick_timer = None    # ticks the elapsed seconds once shown
+        self._tool_name = None
+        self._tool_started_at = 0.0
 
     def compose(self) -> ComposeResult:
         yield StatusBar(id="status")
@@ -215,6 +220,35 @@ class MapleChatApp(App):
 
         self.stream_turn(text)
 
+    def _begin_tool_activity(self, tool_name: str) -> None:
+        """A tool was dispatched: after a 3s delay, show live status in the
+        input box (so fast tools don't flicker). Resets any prior tool timer."""
+        self._clear_tool_activity()
+        self._tool_name = tool_name
+        self._tool_started_at = time.monotonic()
+        self._tool_delay_timer = self.set_timer(3.0, self._show_tool_activity)
+
+    def _show_tool_activity(self) -> None:
+        """3s elapsed and the tool is still running: start ticking the box."""
+        self._tick_tool_activity()
+        self._tool_tick_timer = self.set_interval(1.0, self._tick_tool_activity)
+
+    def _tick_tool_activity(self) -> None:
+        elapsed = int(time.monotonic() - self._tool_started_at)
+        self.query_one(Input).placeholder = f"⚡ {self._tool_name} running ({elapsed}s)…"
+
+    def _clear_tool_activity(self) -> None:
+        """Stop any tool timers and restore the normal input placeholder."""
+        for t in (self._tool_delay_timer, self._tool_tick_timer):
+            if t is not None:
+                t.stop()
+        self._tool_delay_timer = None
+        self._tool_tick_timer = None
+        try:
+            self.query_one(Input).placeholder = f"[{self._agent}] > "
+        except Exception:
+            pass
+
     @work(exclusive=True)
     async def stream_turn(self, message: str) -> None:
         log = self.query_one("#log", VerticalScroll)
@@ -268,6 +302,8 @@ class MapleChatApp(App):
                         log.scroll_end(animate=False)
                         bubble = MessageBubble("")
                         await log.mount(bubble)
+                        # Live status in the input box if this tool runs >3s
+                        self._begin_tool_activity(tool["name"])
 
                     elif "result" in event:
                         # Final flush
@@ -284,6 +320,7 @@ class MapleChatApp(App):
             bubble.update(f"**Connection error:** {exc}")
 
         finally:
+            self._clear_tool_activity()
             if experiment_ended:
                 log = self.query_one("#log", VerticalScroll)
                 await log.mount(

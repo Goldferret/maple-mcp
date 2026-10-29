@@ -162,26 +162,6 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
     if extra_hooks:
         hooks.extend(extra_hooks)
 
-    # Hook to capture complete tool calls (avoids streaming deltas)
-    from strands.hooks import HookProvider, HookRegistry
-    from strands.hooks.events import BeforeToolCallEvent
-
-    tool_queue = []
-
-    class ToolCallCapture(HookProvider):
-        def register_hooks(self, registry: HookRegistry, **kwargs):
-            registry.add_callback(BeforeToolCallEvent, self._on_tool)
-
-        def _on_tool(self, event: BeforeToolCallEvent):
-            tool_queue.append({
-                "name": event.tool_use.get("name", ""),
-                "input": event.tool_use.get("input", {}),
-            })
-            name = event.tool_use.get("name", "?")
-            print(f"INFO:     Tool call: {name}", flush=True)
-
-    hooks.append(ToolCallCapture())
-
     agent = Agent(
         model=model,
         system_prompt=system_prompt,
@@ -196,7 +176,23 @@ def create_operator_agent(session_id: str, extra_hooks: list = None) -> Agent:
         ),
     )
     agent._reasoning_hook = reasoning_hook
-    agent._tool_call_queue = tool_queue
+
+    # Inject a tool_started event into the stream at dispatch, before the
+    # (often long/blocking) tool runs, so the TUI shows the tool call immediately
+    # instead of only after it completes.
+    from strands.middleware import ExecuteToolStage
+    from strands.types.events import TypedEvent
+
+    async def _announce_tool(context, next_fn):
+        tu = getattr(context, "tool_use", None) or {}
+        name = tu.get("name", "?")
+        print(f"INFO:     Tool call: {name}", flush=True)
+        yield TypedEvent({"maple_tool_started": {"name": name, "input": tu.get("input", {})}})
+        async for event in next_fn(context):
+            yield event
+
+    agent.add_middleware(ExecuteToolStage, _announce_tool)
+
     return agent
 
 
@@ -231,28 +227,29 @@ async def stream(request: dict):
     async def event_generator():
         agent = create_operator_agent(session_id)
         reasoning_hook = getattr(agent, "_reasoning_hook", None)
-        tool_queue = getattr(agent, "_tool_call_queue", [])
         experiment_ended = False
 
         async for event in agent.stream_async(message):
             out = {}
 
-            # Emit any queued complete tool calls (from BeforeToolCallEvent hook)
-            while tool_queue:
-                tool = tool_queue.pop(0)
-                tool_event = {
-                    "current_tool_use": {
-                        "toolUseId": f"tool-{tool['name']}",
-                        "name": tool["name"],
-                        "input": tool["input"],
-                    }
-                }
-                yield f"data: {json.dumps(tool_event, default=str)}\n\n"
-                if tool["name"] == "end_experiment":
-                    experiment_ended = True
-
-            # Skip raw streaming tool deltas — hook handles complete calls
+            # Skip raw streaming tool deltas — the ExecuteToolStage middleware
+            # emits a clean tool_started event (handled below) instead.
             if "current_tool_use" in event:
+                continue
+
+            # Tool-start injected by the ExecuteToolStage middleware — forward it
+            # immediately so the TUI shows a pending indicator before the call runs.
+            if "maple_tool_started" in event:
+                ts = event["maple_tool_started"]
+                started_event = {"current_tool_use": {
+                    "toolUseId": f"tool-{ts['name']}",
+                    "name": ts["name"],
+                    "input": ts["input"],
+                    "pending": True,
+                }}
+                yield f"data: {json.dumps(started_event, default=str)}\n\n"
+                if ts["name"] == "end_experiment":
+                    experiment_ended = True
                 continue
 
             if "data" in event:
