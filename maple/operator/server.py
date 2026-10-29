@@ -198,19 +198,33 @@ def _capture_frames(app, view_config: dict) -> dict:
     action = capture.get("action", "capture_camera_image")
     pre = view_config.get("pre_capture_action")
 
+    # Resolve the capture node and verify it exposes the capture action, so a
+    # misrouted capture fails fast with an actionable error instead of dispatching
+    # to a node that can't service it and polling await_workflow forever.
+    capture_node = node or _get_default_node(app)
+    nodes = app.workcell_client.get_nodes()
+    node_actions = (nodes.get(capture_node, {}).get("info") or {}).get("actions", {})
+    if action not in node_actions:
+        raise ToolError(
+            f"Capture action '{action}' is not available on node '{capture_node}'"
+            f"{' (resolved as the default node)' if node is None else ''}. "
+            f"Specify the node explicitly, e.g. detect(node='<camera_node>') / "
+            f"verify(node='<camera_node>'), choosing a node that exposes it."
+        )
+
     # Optional: clean the scene before capturing (e.g. home the arm out of view)
     if pre:
         try:
-            _submit_workflow(pre, node_name=node, app=app)
+            _submit_workflow(pre, node_name=capture_node, app=app)
         except Exception as e:
             app.logger.info(f"pre_capture_action '{pre}' skipped: {e}")
 
-    # Dispatch the capture action
+    # Dispatch the capture action (timeout so a stalled workflow fails fast)
     wf_def = WorkflowDefinition(
         name=action,
         steps=[StepDefinition(
             name=action,
-            node=node or _get_default_node(app),
+            node=capture_node,
             action=action,
             args={},
         )],
@@ -221,6 +235,7 @@ def _capture_frames(app, view_config: dict) -> dict:
         prompt_on_error=False,
         raise_on_failed=False,
         raise_on_cancelled=False,
+        timeout=60,
     )
     step = result.steps[0]
     if step.result is None or step.result.datapoints is None:
