@@ -80,9 +80,9 @@ jobs:
           cp examples/block_sorting/.env .env
 
       - name: Run integration tests
-        # --timeout: a hung test (e.g. await_workflow polling a dead node) fails
-        # fast and named, instead of stalling CI indefinitely. TEMPORARY while we
-        # diagnose the test_experiment_lifecycle hang — tune/remove after.
+        # --timeout: guard against any integration test hanging (e.g. a workflow
+        # polling a node that never reaches terminal) so CI fails fast and named
+        # instead of stalling indefinitely.
         run: pytest -m integration --tb=short --timeout=180 --timeout-method=thread
 
       - name: Tear down

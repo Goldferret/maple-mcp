@@ -40,3 +40,6 @@ scripts/
 # MADSci ExperimentApplication auto-generated node artifacts
 default.node.yaml
 default.node.info.yaml
+
+# MADSci local runtime state (registry/locks/logs)
+.madsci/
