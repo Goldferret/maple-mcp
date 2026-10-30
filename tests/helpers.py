@@ -33,6 +33,24 @@ def wait_for_node_ready(url: str = "http://localhost:2000/status", timeout: int 
     return False
 
 
+def wait_for_operator_ready(url: str = "http://localhost:8102/ping", timeout: int = 30) -> bool:
+    """Block until the operator MCP server responds on /ping. Returns True if ready.
+
+    The MCP server may take longer to accept connections than the stub node,
+    especially on slow CI runners. Fixtures that call_tool against :8102 must
+    wait for THIS, not just the node, or the first call hits ConnectError.
+    """
+    import httpx
+    for _ in range(timeout):
+        try:
+            if httpx.get(url, timeout=3).status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    return False
+
+
 def clean_slate(down: bool = True, port: int = 2000) -> None:
     """Stop MAPLE services and wait for the node port to be released."""
     if down:

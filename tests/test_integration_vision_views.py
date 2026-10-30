@@ -60,7 +60,7 @@ async def call_tool(tool_name: str, arguments: dict, token: str) -> dict:
 @pytest.fixture(scope="module", autouse=True)
 def vision_services():
     """Start stub node + operator using the vision_views fixture config."""
-    from tests.helpers import clean_slate, wait_for_node_ready
+    from tests.helpers import clean_slate, wait_for_node_ready, wait_for_operator_ready
 
     clean_slate()  # ensure port 2000 free before starting
 
@@ -81,6 +81,7 @@ def vision_services():
                    capture_output=True, text=True)
 
     wait_for_node_ready()
+    wait_for_operator_ready()  # the fixture's first op is call_tool(:8102); wait for it
 
     # Wait for StubBot ready in the workcell
     import httpx
