@@ -80,7 +80,10 @@ jobs:
           cp examples/block_sorting/.env .env
 
       - name: Run integration tests
-        run: pytest -m integration --tb=short
+        # --timeout: a hung test (e.g. await_workflow polling a dead node) fails
+        # fast and named, instead of stalling CI indefinitely. TEMPORARY while we
+        # diagnose the test_experiment_lifecycle hang — tune/remove after.
+        run: pytest -m integration --tb=short --timeout=180 --timeout-method=thread
 
       - name: Tear down
         if: always()
