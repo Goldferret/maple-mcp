@@ -219,7 +219,9 @@ def _capture_frames(app, view_config: dict) -> dict:
         except Exception as e:
             app.logger.info(f"pre_capture_action '{pre}' skipped: {e}")
 
-    # Dispatch the capture action (timeout so a stalled workflow fails fast)
+    # Dispatch the capture action. (The node-capability guard above is what
+    # prevents the wrong-node infinite-poll hang; start_workflow's timeout kwarg
+    # isn't portable across MADSci 0.5.0/0.7.1, so we don't pass it here.)
     wf_def = WorkflowDefinition(
         name=action,
         steps=[StepDefinition(
@@ -235,7 +237,6 @@ def _capture_frames(app, view_config: dict) -> dict:
         prompt_on_error=False,
         raise_on_failed=False,
         raise_on_cancelled=False,
-        timeout=60,
     )
     step = result.steps[0]
     if step.result is None or step.result.datapoints is None:
